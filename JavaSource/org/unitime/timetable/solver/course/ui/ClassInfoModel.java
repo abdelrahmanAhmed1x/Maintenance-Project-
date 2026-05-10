@@ -71,6 +71,9 @@ import org.unitime.timetable.model.Event;
 import org.unitime.timetable.model.EventDateMapping;
 import org.unitime.timetable.model.ExactTimeMins;
 import org.unitime.timetable.model.Location;
+import org.unitime.timetable.model.DistributionObject;
+import org.unitime.timetable.model.DistributionPref;
+import org.unitime.timetable.model.PreferenceGroup;
 import org.unitime.timetable.model.PreferenceLevel;
 import org.unitime.timetable.model.Room;
 import org.unitime.timetable.model.RoomFeature;
@@ -84,7 +87,9 @@ import org.unitime.timetable.model.StudentSectioningQueue;
 import org.unitime.timetable.model.TimePatternModel;
 import org.unitime.timetable.model.TimePref;
 import org.unitime.timetable.model.dao.Class_DAO;
+import org.unitime.timetable.model.dao.DistributionPrefDAO;
 import org.unitime.timetable.model.dao.LocationDAO;
+import org.unitime.timetable.model.dao.PreferenceGroupDAO;
 import org.unitime.timetable.model.dao.RoomDAO;
 import org.unitime.timetable.model.dao.SessionDAO;
 import org.unitime.timetable.security.SessionContext;
@@ -98,9 +103,9 @@ import org.unitime.timetable.util.duration.DurationModel;
  * @author Tomas Muller
  */
 public class ClassInfoModel implements Serializable {
-	private static final long serialVersionUID = 1373805772613891251L;
-	protected static CourseMessages MSG = Localization.create(CourseMessages.class);
-	private static Log sLog = LogFactory.getLog(ClassInfoModel.class);
+    private static final long serialVersionUID = 1373805772613891251L;
+    protected static CourseMessages MSG = Localization.create(CourseMessages.class);
+    private static Log sLog = LogFactory.getLog(ClassInfoModel.class);
     private ClassInfo iClass = null;
     private Map<ClassAssignment, Set<Long>> iConflicts = null;
     private ClassInfoForm iForm = null;
@@ -112,334 +117,407 @@ public class ClassInfoModel implements Serializable {
     private boolean iUseRealStudents = true;
     private boolean iUnassignConflictingAssignments = false;
     private transient SessionContext iContext = null;
-    
+
     public void clear(String userId) {
-        iClass = null; iConflicts = null; iChange = null; iRooms = null; iDates = null; iTimes = null; iUnassignConflictingAssignments = false;
+        iClass = null;
+        iConflicts = null;
+        iChange = null;
+        iRooms = null;
+        iDates = null;
+        iTimes = null;
+        iUnassignConflictingAssignments = false;
     }
-    
+
     public ClassInfo getClazz() {
         return iClass;
     }
+
     public ClassAssignmentInfo getClassOldAssignment() {
         if (iClass instanceof ClassAssignmentInfo)
-            return (ClassAssignmentInfo)iClass;
+            return (ClassAssignmentInfo) iClass;
         return null;
     }
+
     public ClassAssignmentInfo getClassAssignment() {
-        if (iChange!=null && iChange.getConflict(iClass)!=null) return null;
+        if (iChange != null && iChange.getConflict(iClass) != null)
+            return null;
         if (iClass instanceof ClassAssignmentInfo)
-            return (ClassAssignmentInfo)iClass;
+            return (ClassAssignmentInfo) iClass;
         return null;
     }
+
     public boolean isClassAssigned() {
-        return getClassAssignment()!=null && getClassAssignment().getTime()!=null; 
+        return getClassAssignment() != null && getClassAssignment().getTime() != null;
     }
+
     public ClassDateInfo getAssignedDate() {
-    	try {
-    		ClassAssignmentInfo info = getSelectedAssignment();
-    		if (info != null && info.hasDate()) return info.getDate();
-    	} catch (Exception e){}
-    	DatePattern dp = getClazz().getClazz().effectiveDatePattern();
-    	if (dp == null) return null;
-    	if (!dp.isPatternSet()) {
-    		return new ClassDateInfo(
-    				dp.getUniqueId(),
-    				getClazz().getClassId(),
-    				dp.getName(),
-    				dp.getPatternBitSet(),
-    				PreferenceLevel.sIntLevelNeutral);
-    	} 
-    	return null;
+        try {
+            ClassAssignmentInfo info = getSelectedAssignment();
+            if (info != null && info.hasDate())
+                return info.getDate();
+        } catch (Exception e) {
+        }
+        DatePattern dp = getClazz().getClazz().effectiveDatePattern();
+        if (dp == null)
+            return null;
+        if (!dp.isPatternSet()) {
+            return new ClassDateInfo(
+                    dp.getUniqueId(),
+                    getClazz().getClassId(),
+                    dp.getName(),
+                    dp.getPatternBitSet(),
+                    PreferenceLevel.sIntLevelNeutral);
+        }
+        return null;
     }
-    
+
     public void update() throws Exception {
-        if (iChange==null) return;
+        if (iChange == null)
+            return;
         Vector<ClassAssignment> assignments = new Vector(iChange.getAssignments());
-        Hashtable<Long,ClassAssignment> table = iChange.getAssignmentTable();
+        Hashtable<Long, ClassAssignment> table = iChange.getAssignmentTable();
         iUnassignConflictingAssignments = !iForm.getKeepConflictingAssignments();
         iChange.getAssignments().clear();
         for (ClassAssignment assignment : assignments) {
-            iChange.getAssignments().add(new ClassAssignmentInfo(assignment.getClazz(),assignment.getTime(),assignment.getDate(),assignment.getRooms(),table, isUseRealStudents(), null));
+            iChange.getAssignments().add(new ClassAssignmentInfo(assignment.getClazz(), assignment.getTime(),
+                    assignment.getDate(), assignment.getRooms(), table, isUseRealStudents(), null));
         }
         if (assignments.isEmpty()) {
-        	for (Iterator<ClassAssignment> i = iChange.getConflicts().iterator(); i.hasNext(); ) {
-        		ClassAssignment assignment = i.next();
-        		if (assignment == null || !assignment.getClassId().equals(getClazz().getClassId())) i.remove();
-        	}
+            for (Iterator<ClassAssignment> i = iChange.getConflicts().iterator(); i.hasNext();) {
+                ClassAssignment assignment = i.next();
+                if (assignment == null || !assignment.getClassId().equals(getClazz().getClassId()))
+                    i.remove();
+            }
         } else {
-        	iChange.getConflicts().clear();
+            iChange.getConflicts().clear();
         }
         for (ClassAssignment assignment : iChange.getAssignments()) {
-        	// Skip incomplete assignments (that have no time assigned yet)
-        	if (!assignment.hasTime()) continue;
-        	
-        	// Check for room conflicts
-        	if (iUnassignConflictingAssignments){
-	            if (assignment.getRooms()!=null) for (ClassRoomInfo room : assignment.getRooms()) {
-	            	if (!room.isIgnoreRoomChecks()){
-		            	for (Assignment a : room.getLocation().getCommitedAssignments()) {
-		            		if (a.getClazz().isCancelled()) continue;
-		            		if (assignment.getTime().overlaps(new ClassTimeInfo(a)) && !a.getClazz().canShareRoom(assignment.getClazz())) {
-		            			if (iChange.getCurrent(a.getClassId())==null && iChange.getConflict(a.getClassId())==null)
-		            				iChange.getConflicts().add(new ClassAssignment(a));
-		            		}
-		            	}
-	            	}
-	            	if (room.getLocation() instanceof Room) {
-						Room r = (Room)room.getLocation(RoomDAO.getInstance().getSession());
-						if (r.getParentRoom() != null && !r.getParentRoom().isIgnoreRoomCheck()) {
-							for (Assignment a : r.getParentRoom().getCommitedAssignments()) {
-			            		if (a.getClazz().isCancelled()) continue;
-			            		if (assignment.getTime().overlaps(new ClassTimeInfo(a)) && !a.getClazz().canShareRoom(assignment.getClazz())) {
-			            			if (iChange.getCurrent(a.getClassId())==null && iChange.getConflict(a.getClassId())==null)
-			            				iChange.getConflicts().add(new ClassAssignment(a));
-			            		}
-			            	}
-						}
-						for (Room p: r.getPartitions()) {
-							if (!p.isIgnoreRoomCheck())
-								for (Assignment a : p.getCommitedAssignments()) {
-				            		if (a.getClazz().isCancelled()) continue;
-				            		if (assignment.getTime().overlaps(new ClassTimeInfo(a)) && !a.getClazz().canShareRoom(assignment.getClazz())) {
-				            			if (iChange.getCurrent(a.getClassId())==null && iChange.getConflict(a.getClassId())==null)
-				            				iChange.getConflicts().add(new ClassAssignment(a));
-				            		}
-				            	}
-						}
-					}
-	            }
-	            
-	            // Check for instructor conflicts
-	            if (assignment.getInstructors()!=null) for (ClassInstructorInfo instructor : assignment.getInstructors()) {
-	            	if (!instructor.isLead()) continue;
-	            	// check all departmental instructors with the same external id
-	            	for (DepartmentalInstructor di: DepartmentalInstructor.getAllForInstructor(instructor.getInstructor().getInstructor())) {
-		            	for (ClassInstructor ci : di.getClasses()) {
-		            		if (ci.equals(instructor.getInstructor())) continue;
-		            		if (!ci.isLead()) continue;
-		            		Assignment a = ci.getClassInstructing().getCommittedAssignment();
-		            		if (a == null || a.getClazz().isCancelled()) continue;
-		            		if (assignment.getTime() != null && assignment.getTime().overlaps(new ClassTimeInfo(a)) && !a.getClazz().canShareInstructor(assignment.getClazz())) {
-		            			if (iChange.getCurrent(a.getClassId())==null && iChange.getConflict(a.getClassId())==null)
-		            				iChange.getConflicts().add(new ClassAssignment(a));
-		            		}
-		            	}
-	            	}
-	            	/*
-	            	// Potential speed-up #1) only check the current department instructors
-	            	for (ClassInstructor ci : instructor.getInstructor().getInstructor().getClasses()) {
-	            		if (ci.equals(instructor.getInstructor())) continue;
-	            		Assignment a = ci.getClassInstructing().getCommittedAssignment();
-	            		if (a == null) continue;
-	            		if (assignment.getTime().overlaps(new ClassTimeInfo(a))) {
-	            			if (iChange.getCurrent(a.getClassId())==null && iChange.getConflict(a.getClassId())==null)
-	            				iChange.getConflicts().add(new ClassAssignment(a));
-	            		}
-	            	}
-	            	*/
-	            	/*
-	            	// Potential speed-up #2) use instructor assignments from the solution
-	            	for (Assignment a : instructor.getInstructor().getInstructor().getCommitedAssignments()) {
-	            		if (assignment.getTime().overlaps(new ClassTimeInfo(a))) {
-	            			if (iChange.getCurrent(a.getClassId())==null && iChange.getConflict(a.getClassId())==null)
-	            				iChange.getConflicts().add(new ClassAssignment(a));
-	            		}
-	            	}
-	            	*/
-	            }
-        	}
+            // Skip incomplete assignments (that have no time assigned yet)
+            if (!assignment.hasTime())
+                continue;
+
+            // Check for room conflicts
+            if (iUnassignConflictingAssignments) {
+                if (assignment.getRooms() != null)
+                    for (ClassRoomInfo room : assignment.getRooms()) {
+                        if (!room.isIgnoreRoomChecks()) {
+                            for (Assignment a : room.getLocation().getCommitedAssignments()) {
+                                if (a.getClazz().isCancelled())
+                                    continue;
+                                if (assignment.getTime().overlaps(new ClassTimeInfo(a))
+                                        && !a.getClazz().canShareRoom(assignment.getClazz())) {
+                                    if (iChange.getCurrent(a.getClassId()) == null
+                                            && iChange.getConflict(a.getClassId()) == null)
+                                        iChange.getConflicts().add(new ClassAssignment(a));
+                                }
+                            }
+                        }
+                        if (room.getLocation() instanceof Room) {
+                            Room r = (Room) room.getLocation(RoomDAO.getInstance().getSession());
+                            if (r.getParentRoom() != null && !r.getParentRoom().isIgnoreRoomCheck()) {
+                                for (Assignment a : r.getParentRoom().getCommitedAssignments()) {
+                                    if (a.getClazz().isCancelled())
+                                        continue;
+                                    if (assignment.getTime().overlaps(new ClassTimeInfo(a))
+                                            && !a.getClazz().canShareRoom(assignment.getClazz())) {
+                                        if (iChange.getCurrent(a.getClassId()) == null
+                                                && iChange.getConflict(a.getClassId()) == null)
+                                            iChange.getConflicts().add(new ClassAssignment(a));
+                                    }
+                                }
+                            }
+                            for (Room p : r.getPartitions()) {
+                                if (!p.isIgnoreRoomCheck())
+                                    for (Assignment a : p.getCommitedAssignments()) {
+                                        if (a.getClazz().isCancelled())
+                                            continue;
+                                        if (assignment.getTime().overlaps(new ClassTimeInfo(a))
+                                                && !a.getClazz().canShareRoom(assignment.getClazz())) {
+                                            if (iChange.getCurrent(a.getClassId()) == null
+                                                    && iChange.getConflict(a.getClassId()) == null)
+                                                iChange.getConflicts().add(new ClassAssignment(a));
+                                        }
+                                    }
+                            }
+                        }
+                    }
+
+                // Check for instructor conflicts
+                if (assignment.getInstructors() != null)
+                    for (ClassInstructorInfo instructor : assignment.getInstructors()) {
+                        if (!instructor.isLead())
+                            continue;
+                        // check all departmental instructors with the same external id
+                        for (DepartmentalInstructor di : DepartmentalInstructor
+                                .getAllForInstructor(instructor.getInstructor().getInstructor())) {
+                            for (ClassInstructor ci : di.getClasses()) {
+                                if (ci.equals(instructor.getInstructor()))
+                                    continue;
+                                if (!ci.isLead())
+                                    continue;
+                                Assignment a = ci.getClassInstructing().getCommittedAssignment();
+                                if (a == null || a.getClazz().isCancelled())
+                                    continue;
+                                if (assignment.getTime() != null && assignment.getTime().overlaps(new ClassTimeInfo(a))
+                                        && !a.getClazz().canShareInstructor(assignment.getClazz())) {
+                                    if (iChange.getCurrent(a.getClassId()) == null
+                                            && iChange.getConflict(a.getClassId()) == null)
+                                        iChange.getConflicts().add(new ClassAssignment(a));
+                                }
+                            }
+                        }
+                        /*
+                         * // Potential speed-up #1) only check the current department instructors
+                         * for (ClassInstructor ci :
+                         * instructor.getInstructor().getInstructor().getClasses()) {
+                         * if (ci.equals(instructor.getInstructor())) continue;
+                         * Assignment a = ci.getClassInstructing().getCommittedAssignment();
+                         * if (a == null) continue;
+                         * if (assignment.getTime().overlaps(new ClassTimeInfo(a))) {
+                         * if (iChange.getCurrent(a.getClassId())==null &&
+                         * iChange.getConflict(a.getClassId())==null)
+                         * iChange.getConflicts().add(new ClassAssignment(a));
+                         * }
+                         * }
+                         */
+                        /*
+                         * // Potential speed-up #2) use instructor assignments from the solution
+                         * for (Assignment a :
+                         * instructor.getInstructor().getInstructor().getCommitedAssignments()) {
+                         * if (assignment.getTime().overlaps(new ClassTimeInfo(a))) {
+                         * if (iChange.getCurrent(a.getClassId())==null &&
+                         * iChange.getConflict(a.getClassId())==null)
+                         * iChange.getConflicts().add(new ClassAssignment(a));
+                         * }
+                         * }
+                         */
+                    }
+            }
             // Check the course structure for conflicts
             Class_ clazz = assignment.getClazz(Class_DAO.getInstance().getSession());
             // a) all parents
             Class_ parent = clazz.getParentClass();
-            while (parent!=null) {
-            	if (iChange.getCurrent(parent.getUniqueId())==null && iChange.getConflict(parent.getUniqueId())==null) {
-            		Assignment a = parent.getCommittedAssignment();
-            		if (a!=null && !a.getClazz().isCancelled() && assignment.getTime().overlaps(new ClassTimeInfo(a))) {
-            			iChange.getConflicts().add(new ClassAssignment(a));
-            		}
-            	}
-            	parent = parent.getParentClass();
+            while (parent != null) {
+                if (iChange.getCurrent(parent.getUniqueId()) == null
+                        && iChange.getConflict(parent.getUniqueId()) == null) {
+                    Assignment a = parent.getCommittedAssignment();
+                    if (a != null && !a.getClazz().isCancelled()
+                            && assignment.getTime().overlaps(new ClassTimeInfo(a))) {
+                        iChange.getConflicts().add(new ClassAssignment(a));
+                    }
+                }
+                parent = parent.getParentClass();
             }
             // b) all children
             Queue<Class_> children = new LinkedList();
             try {
-            	children.addAll(clazz.getChildClasses());
+                children.addAll(clazz.getChildClasses());
             } catch (LazyInitializationException e) {
-            	sLog.error("This should never happen.");
-            	Class_ c = Class_DAO.getInstance().get(assignment.getClassId());
-            	children.addAll(c.getChildClasses());
+                sLog.error("This should never happen.");
+                Class_ c = Class_DAO.getInstance().get(assignment.getClassId());
+                children.addAll(c.getChildClasses());
             }
             Class_ child = null;
-            while ((child=children.poll())!=null) {
-            	if (iChange.getCurrent(child.getUniqueId())==null && iChange.getConflict(child.getUniqueId())==null) {
-            		Assignment a = child.getCommittedAssignment();
-            		if (a!=null && !a.getClazz().isCancelled() && assignment.getTime().overlaps(new ClassTimeInfo(a))) {
-            			iChange.getConflicts().add(new ClassAssignment(a));
-            		}
-            	}
-            	if (!child.getChildClasses().isEmpty())
-            		children.addAll(child.getChildClasses());
+            while ((child = children.poll()) != null) {
+                if (iChange.getCurrent(child.getUniqueId()) == null
+                        && iChange.getConflict(child.getUniqueId()) == null) {
+                    Assignment a = child.getCommittedAssignment();
+                    if (a != null && !a.getClazz().isCancelled()
+                            && assignment.getTime().overlaps(new ClassTimeInfo(a))) {
+                        iChange.getConflicts().add(new ClassAssignment(a));
+                    }
+                }
+                if (!child.getChildClasses().isEmpty())
+                    children.addAll(child.getChildClasses());
             }
             // c) all single-class subparts
-            for (Iterator i=clazz.getSchedulingSubpart().getInstrOfferingConfig().getSchedulingSubparts().iterator(); i.hasNext();) {
-            	SchedulingSubpart ss = (SchedulingSubpart)i.next();
-            	if (ss.getClasses().size()==1) {
-            		child = (Class_)ss.getClasses().iterator().next();
-                	if (iChange.getCurrent(child.getUniqueId())==null && iChange.getConflict(child.getUniqueId())==null) {
-                		Assignment a = child.getCommittedAssignment();
-                		if (a!=null && !a.getClazz().isCancelled() && assignment.getTime().overlaps(new ClassTimeInfo(a))) {
-                			iChange.getConflicts().add(new ClassAssignment(a));
-                		}
-                	}
-                	if (!child.getChildClasses().isEmpty())
-                		children.addAll(child.getChildClasses());
-            	}
+            for (Iterator i = clazz.getSchedulingSubpart().getInstrOfferingConfig().getSchedulingSubparts()
+                    .iterator(); i.hasNext();) {
+                SchedulingSubpart ss = (SchedulingSubpart) i.next();
+                if (ss.getClasses().size() == 1) {
+                    child = (Class_) ss.getClasses().iterator().next();
+                    if (iChange.getCurrent(child.getUniqueId()) == null
+                            && iChange.getConflict(child.getUniqueId()) == null) {
+                        Assignment a = child.getCommittedAssignment();
+                        if (a != null && !a.getClazz().isCancelled()
+                                && assignment.getTime().overlaps(new ClassTimeInfo(a))) {
+                            iChange.getConflicts().add(new ClassAssignment(a));
+                        }
+                    }
+                    if (!child.getChildClasses().isEmpty())
+                        children.addAll(child.getChildClasses());
+                }
             }
-                        
-            //TODO: Check for other HARD conflicts (e.g., distribution constraints)
+
+            // d) HARD distribution constraints (Required / Prohibited)
+            checkHardDistributionConflicts(assignment, clazz);
         }
     }
-    
+
     public String assign(SessionContext context) {
-        if (iChange==null) return MSG.errorNothingToAssign();
+        if (iChange == null)
+            return MSG.errorNothingToAssign();
         if (ApplicationProperty.ClassAssignmentAllowUnassignments.isFalse() && !iChange.getConflicts().isEmpty())
-        	return MSG.errorNotAllowedToKeepClassUnassigned();
-        sLog.info("About to be assigned: "+iChange);
+            return MSG.errorNotAllowedToKeepClassUnassigned();
+        sLog.info("About to be assigned: " + iChange);
         org.hibernate.Session hibSession = Class_DAO.getInstance().getSession();
         String message = null;
         Map<Long, List<Long>> touchedOfferingIds = new Hashtable<Long, List<Long>>();
         for (ClassAssignment assignment : iChange.getConflicts()) {
-        	try {
+            try {
                 Class_ clazz = assignment.getClazz(hibSession);
-        		String m = clazz.unassignCommited(context.getUser(), hibSession);
-                if (m!=null) message = (message==null?"":message+"\n")+m;
-                Long offeringId = clazz.getSchedulingSubpart().getInstrOfferingConfig().getInstructionalOffering().getUniqueId();
+                String m = clazz.unassignCommited(context.getUser(), hibSession);
+                if (m != null)
+                    message = (message == null ? "" : message + "\n") + m;
+                Long offeringId = clazz.getSchedulingSubpart().getInstrOfferingConfig().getInstructionalOffering()
+                        .getUniqueId();
                 List<Long> classIds = touchedOfferingIds.get(offeringId);
                 if (classIds == null) {
-                	classIds = new ArrayList<Long>();
-                	touchedOfferingIds.put(offeringId, classIds);
+                    classIds = new ArrayList<Long>();
+                    touchedOfferingIds.put(offeringId, classIds);
                 }
                 classIds.add(clazz.getUniqueId());
             } catch (Exception e) {
-                message = (message==null?"":message+"\n")+MSG.errorUnassignmentFailed(assignment.getClassName(), e.getMessage());
+                message = (message == null ? "" : message + "\n")
+                        + MSG.errorUnassignmentFailed(assignment.getClassName(), e.getMessage());
             }
         }
         for (ClassAssignment assignment : iChange.getAssignments()) {
             try {
                 Class_ clazz = assignment.getClazz(hibSession);
                 String m = clazz.assignCommited(getAssignmentInfo(assignment), context.getUser(), hibSession);
-                if (m!=null) message = (message==null?"":message+"\n")+m;
-                Long offeringId = clazz.getSchedulingSubpart().getInstrOfferingConfig().getInstructionalOffering().getUniqueId();
+                if (m != null)
+                    message = (message == null ? "" : message + "\n") + m;
+                Long offeringId = clazz.getSchedulingSubpart().getInstrOfferingConfig().getInstructionalOffering()
+                        .getUniqueId();
                 List<Long> classIds = touchedOfferingIds.get(offeringId);
                 if (classIds == null) {
-                	classIds = new ArrayList<Long>();
-                	touchedOfferingIds.put(offeringId, classIds);
+                    classIds = new ArrayList<Long>();
+                    touchedOfferingIds.put(offeringId, classIds);
                 }
                 classIds.add(clazz.getUniqueId());
             } catch (Exception e) {
-                message = (message==null?"":message+"\n")+MSG.errorAssignmentFailed(assignment.getClassName(), assignment.getTime().getName()+" "+assignment.getRoomNames(", "), e.getMessage());
+                message = (message == null ? "" : message + "\n") + MSG.errorAssignmentFailed(assignment.getClassName(),
+                        assignment.getTime().getName() + " " + assignment.getRoomNames(", "), e.getMessage());
             }
         }
-        
+
         Long sessionId = context.getUser().getCurrentAcademicSessionId();
         Session session = SessionDAO.getInstance().get(sessionId, hibSession);
         if (!session.getStatusType().isTestSession()) {
             if (session.getStatusType().canOnlineSectionStudents()) {
-            	List<Long> unlockedOfferings = new ArrayList<Long>();
-            	for (Long offeringId: touchedOfferingIds.keySet())
-            		if (!session.isOfferingLocked(offeringId))
-            			unlockedOfferings.add(offeringId);
-            	if (!unlockedOfferings.isEmpty())
-            		StudentSectioningQueue.offeringChanged(hibSession, context.getUser(), sessionId, unlockedOfferings);
+                List<Long> unlockedOfferings = new ArrayList<Long>();
+                for (Long offeringId : touchedOfferingIds.keySet())
+                    if (!session.isOfferingLocked(offeringId))
+                        unlockedOfferings.add(offeringId);
+                if (!unlockedOfferings.isEmpty())
+                    StudentSectioningQueue.offeringChanged(hibSession, context.getUser(), sessionId, unlockedOfferings);
             } else if (session.getStatusType().canSectionAssistStudents()) {
-            	for (Map.Entry<Long, List<Long>> entry: touchedOfferingIds.entrySet()) {
-            		if (!session.isOfferingLocked(entry.getKey()))
-            			StudentSectioningQueue.classAssignmentChanged(hibSession, context.getUser(), sessionId, entry.getValue());        		
-            	}
+                for (Map.Entry<Long, List<Long>> entry : touchedOfferingIds.entrySet()) {
+                    if (!session.isOfferingLocked(entry.getKey()))
+                        StudentSectioningQueue.classAssignmentChanged(hibSession, context.getUser(), sessionId,
+                                entry.getValue());
+                }
             }
         }
         hibSession.flush();
-        
+
         return message;
     }
-    
+
     public boolean getCanAssign() {
-        if (iChange==null) return false;
+        if (iChange == null)
+            return false;
         for (ClassAssignment assignment : iChange.getAssignments()) {
-            if (!assignment.isValid()) return false;
-            if (!getSessionContext().hasPermission(assignment.getClazz(), Right.ClassAssignment)) return false; 
+            if (!assignment.isValid())
+                return false;
+            if (!getSessionContext().hasPermission(assignment.getClazz(), Right.ClassAssignment))
+                return false;
         }
         for (ClassAssignment assignment : iChange.getConflicts()) {
-        	if (!getSessionContext().hasPermission(assignment.getClazz(), Right.ClassAssignment)) return false;
+            if (!getSessionContext().hasPermission(assignment.getClazz(), Right.ClassAssignment))
+                return false;
         }
-        if (ApplicationProperty.ClassAssignmentAllowUnassignments.isFalse() && !iChange.getConflicts().isEmpty()) return false;
+        if (ApplicationProperty.ClassAssignmentAllowUnassignments.isFalse() && !iChange.getConflicts().isEmpty())
+            return false;
         return true;
     }
-    
+
     public String getAssignConfirm() {
-    	return MSG.confirmClassAssignment();
+        return MSG.confirmClassAssignment();
     }
-    
+
     public void setForm(ClassInfoForm form) {
         iForm = form;
     }
-    
+
     public void setClazz(Class_ clazz) {
-        iDates = null; iTimes = null; iRooms = null;
+        iDates = null;
+        iTimes = null;
+        iRooms = null;
         if (iShowStudentConflicts && ApplicationProperty.ClassAssignmentPrefetchConflicts.isTrue())
-        	iConflicts = ClassInfo.findAllRelatedAssignments(clazz.getUniqueId(), isUseRealStudents());
+            iConflicts = ClassInfo.findAllRelatedAssignments(clazz.getUniqueId(), isUseRealStudents());
         else
-        	iConflicts = null;
-        if (clazz.getCommittedAssignment()!=null) {
+            iConflicts = null;
+        if (clazz.getCommittedAssignment() != null) {
             iClass = new ClassAssignmentInfo(clazz.getCommittedAssignment(), isUseRealStudents(), iConflicts);
-        } else  
+        } else
             iClass = new ClassInfo(clazz);
-        if (iChange!=null) {
+        if (iChange != null) {
             iChange.setSelected(clazz.getUniqueId());
             /*
-            for (Iterator<ClassAssignmentInfo> i=iChange.getAssignments().iterator();i.hasNext();) {
-                ClassAssignmentInfo a = i.next();
-                if (!a.isValid()) i.remove();
-            }
-            */
+             * for (Iterator<ClassAssignmentInfo>
+             * i=iChange.getAssignments().iterator();i.hasNext();) {
+             * ClassAssignmentInfo a = i.next();
+             * if (!a.isValid()) i.remove();
+             * }
+             */
         }
-        if (clazz.getNbrRooms()>0) {
+        if (clazz.getNbrRooms() > 0) {
             iForm.setMinRoomSize(String.valueOf(clazz.getMinRoomLimit()));
             iForm.setMaxRoomSize(null);
         }
-        if (clazz.getNbrRooms()>1 && Boolean.TRUE.equals(clazz.isRoomsSplitAttendance())) {
+        if (clazz.getNbrRooms() > 1 && Boolean.TRUE.equals(clazz.isRoomsSplitAttendance())) {
             iForm.setMinRoomSize(String.valueOf(clazz.getMinRoomLimit() / clazz.getNbrRooms()));
             iForm.setMaxRoomSize(null);
         }
         iForm.setRoomFilter(null);
     }
-    
+
     public ClassAssignmentInfo getAssignmentInfo(ClassAssignment assignment) throws Exception {
-        if (assignment instanceof ClassAssignmentInfo) return (ClassAssignmentInfo)assignment;
+        if (assignment instanceof ClassAssignmentInfo)
+            return (ClassAssignmentInfo) assignment;
         if (assignment.getClassId().equals(iClass.getClassId())) {
-        	if (iChange!=null)
-                return new ClassAssignmentInfo(assignment.getClazz(), assignment.getTime(), assignment.getDate(), assignment.getRooms(), iChange.getAssignmentTable(), isUseRealStudents(), iConflicts);
+            if (iChange != null)
+                return new ClassAssignmentInfo(assignment.getClazz(), assignment.getTime(), assignment.getDate(),
+                        assignment.getRooms(), iChange.getAssignmentTable(), isUseRealStudents(), iConflicts);
             else
-                return new ClassAssignmentInfo(assignment.getClazz(), assignment.getTime(), assignment.getDate(), assignment.getRooms(), isUseRealStudents(), iConflicts);
+                return new ClassAssignmentInfo(assignment.getClazz(), assignment.getTime(), assignment.getDate(),
+                        assignment.getRooms(), isUseRealStudents(), iConflicts);
         } else {
-        	if (iChange!=null)
-                return new ClassAssignmentInfo(assignment.getClazz(), assignment.getTime(), assignment.getDate(), assignment.getRooms(), iChange.getAssignmentTable(), isUseRealStudents(), null);
+            if (iChange != null)
+                return new ClassAssignmentInfo(assignment.getClazz(), assignment.getTime(), assignment.getDate(),
+                        assignment.getRooms(), iChange.getAssignmentTable(), isUseRealStudents(), null);
             else
-                return new ClassAssignmentInfo(assignment.getClazz(), assignment.getTime(), assignment.getDate(), assignment.getRooms(), isUseRealStudents(), null);
+                return new ClassAssignmentInfo(assignment.getClazz(), assignment.getTime(), assignment.getDate(),
+                        assignment.getRooms(), isUseRealStudents(), null);
         }
     }
-    
+
     public ClassAssignmentInfo getSelectedAssignment() throws Exception {
-        if (iChange==null) return null;
+        if (iChange == null)
+            return null;
         for (ClassAssignment assignment : iChange.getAssignments())
-            if (assignment.getClassId().equals(iClass.getClassId())) return getAssignmentInfo(assignment);
-        return null; 
+            if (assignment.getClassId().equals(iClass.getClassId()))
+                return getAssignmentInfo(assignment);
+        return null;
     }
-    
+
     public void setDate(String dateId) throws Exception {
-        iRooms = null; iTimes = null;
-        if (iChange==null) iChange = new ClassProposedChange();
+        iRooms = null;
+        iTimes = null;
+        if (iChange == null)
+            iChange = new ClassProposedChange();
         Class_ clazz = getClazz().getClazz();
         DurationModel dm = clazz.getSchedulingSubpart().getInstrOfferingConfig().getDurationModel();
         ClassTimeInfo time = (getSelectedAssignment() == null ? null : getSelectedAssignment().getTime());
@@ -447,50 +525,62 @@ public class ClassInfoModel implements Serializable {
         EventDateMapping.Class2EventDateMap class2eventDates = EventDateMapping.getMapping(clazz.getSessionId());
         for (ClassAssignment date : getDates()) {
             if (dateId.equals(date.getDateId())) {
-                List<Date> dates = (time == null || !date.hasDate() ? null : dm.getDates(
-                		clazz.getSchedulingSubpart().getMinutesPerWk(), date.getDate().getDatePattern(), time.getDayCode(), time.getMinutesPerMeeting(),
-                		class2eventDates));
+                List<Date> dates = (time == null || !date.hasDate() ? null
+                        : dm.getDates(
+                                clazz.getSchedulingSubpart().getMinutesPerWk(), date.getDate().getDatePattern(),
+                                time.getDayCode(), time.getMinutesPerMeeting(),
+                                class2eventDates));
                 iChange.addChange(
-                		new ClassAssignmentInfo(getClazz().getClazz(), (time == null ? null : new ClassTimeInfo(time, date.getDate(), dates)), date.getDate(), rooms, iChange.getAssignmentTable(), isUseRealStudents(), iConflicts), 
-                		getClassOldAssignment());
+                        new ClassAssignmentInfo(getClazz().getClazz(),
+                                (time == null ? null : new ClassTimeInfo(time, date.getDate(), dates)), date.getDate(),
+                                rooms, iChange.getAssignmentTable(), isUseRealStudents(), iConflicts),
+                        getClassOldAssignment());
             }
         }
-        if (iChange.isEmpty()) iChange = null; 
+        if (iChange.isEmpty())
+            iChange = null;
         update();
     }
-    
+
     public void setTime(String timeId) throws Exception {
         iRooms = null;
-        if (iChange==null) iChange = new ClassProposedChange();
-		for (ClassAssignment time : getAllTimes()) {
+        if (iChange == null)
+            iChange = new ClassProposedChange();
+        for (ClassAssignment time : getAllTimes()) {
             if (timeId.equals(time.getTimeId())) {
                 iChange.addChange(
-                		new ClassAssignmentInfo(getClazz().getClazz(), time.getTime(), time.getDate(), null, iChange.getAssignmentTable(), isUseRealStudents(), iConflicts), 
-                		getClassOldAssignment());
+                        new ClassAssignmentInfo(getClazz().getClazz(), time.getTime(), time.getDate(), null,
+                                iChange.getAssignmentTable(), isUseRealStudents(), iConflicts),
+                        getClassOldAssignment());
             }
-		}       
-		if ("-1".equals(timeId)) {
-			iChange.addChange(
-					new ClassAssignmentInfo(getClazz().getClazz(), null, null, null, iChange.getAssignmentTable(), isUseRealStudents(), iConflicts), 
-            		getClassOldAssignment());
-		}
-        if (iChange.isEmpty()) iChange = null; 
+        }
+        if ("-1".equals(timeId)) {
+            iChange.addChange(
+                    new ClassAssignmentInfo(getClazz().getClazz(), null, null, null, iChange.getAssignmentTable(),
+                            isUseRealStudents(), iConflicts),
+                    getClassOldAssignment());
+        }
+        if (iChange.isEmpty())
+            iChange = null;
         update();
     }
-    
+
     public void delete(long classId) throws Exception {
-        if (iChange==null) return;
+        if (iChange == null)
+            return;
         for (Iterator<ClassAssignmentInfo> i = iChange.getAssignments().iterator(); i.hasNext();) {
-            ClassAssignmentInfo x = (ClassAssignmentInfo)i.next();
-            if (x.getClassId().equals(classId)) i.remove();
+            ClassAssignmentInfo x = (ClassAssignmentInfo) i.next();
+            if (x.getClassId().equals(classId))
+                i.remove();
         }
         update();
     }
-    
+
     public void setRooms(String rooms) throws Exception {
-        if (iChange==null) iChange = new ClassProposedChange();
+        if (iChange == null)
+            iChange = new ClassProposedChange();
         ClassAssignment assignment = iChange.getCurrent(iClass);
-        if (assignment==null && isClassAssigned()) {
+        if (assignment == null && isClassAssigned()) {
             for (ClassAssignment time : getAllTimes()) {
                 if (getClassOldAssignment().getTimeId().equals(time.getTimeId())) {
                     assignment = time;
@@ -498,141 +588,157 @@ public class ClassInfoModel implements Serializable {
                 }
             }
         }
-        if (assignment==null) return;
+        if (assignment == null)
+            return;
         TreeSet<ClassRoomInfo> assignedRooms = new TreeSet();
-        for (StringTokenizer stk=new StringTokenizer(rooms,":");stk.hasMoreTokens();) {
+        for (StringTokenizer stk = new StringTokenizer(rooms, ":"); stk.hasMoreTokens();) {
             String token = stk.nextToken();
-            if (token.trim().length()==0) continue;
+            if (token.trim().length() == 0)
+                continue;
             Long roomId = Long.valueOf(token.substring(0, token.indexOf('@')));
             ClassRoomInfo room = null;
             for (ClassRoomInfo r : getRooms()) {
-                if (r.getLocationId().equals(roomId)) { room = r; break; }
+                if (r.getLocationId().equals(roomId)) {
+                    room = r;
+                    break;
+                }
             }
-            if (room!=null) assignedRooms.add(room);
+            if (room != null)
+                assignedRooms.add(room);
         }
         iChange.addChange(
-        		new ClassAssignmentInfo(getClazz().getClazz(), assignment.getTime(), assignment.getDate(), assignedRooms, iChange.getAssignmentTable(), isUseRealStudents(), iConflicts),
-        		getClassOldAssignment());
-        if (iChange.isEmpty()) iChange = null; 
+                new ClassAssignmentInfo(getClazz().getClazz(), assignment.getTime(), assignment.getDate(),
+                        assignedRooms, iChange.getAssignmentTable(), isUseRealStudents(), iConflicts),
+                getClassOldAssignment());
+        if (iChange.isEmpty())
+            iChange = null;
         update();
     }
-    
+
     public void apply(HttpServletRequest request, ClassInfoForm form) {
         iForm = form;
     }
-    
+
     public void refreshRooms() {
         iRooms = null;
     }
-    
+
     public String getDatesTable() {
-    	try {
-    		String ret = "";
+        try {
+            String ret = "";
             ret += "<script language='javascript'>";
             ret += "function dateOver(source, id) { ";
             ret += "    document.getElementById('d'+id).style.backgroundColor='rgb(223,231,242)';";
             if (iShowStudentConflicts)
-            	ret += "    document.getElementById('dc'+id).style.backgroundColor='rgb(223,231,242)';";
+                ret += "    document.getElementById('dc'+id).style.backgroundColor='rgb(223,231,242)';";
             ret += "    source.style.cursor='hand';source.style.cursor='pointer';";
             ret += "}";
             ret += "function dateOut(id) { ";
             ret += "    var bg = 'transparent';";
-            ClassAssignment classAssignment = (iChange==null?null:iChange.getCurrent(iClass));
-            if (classAssignment!=null && classAssignment.hasDate())
-            	ret += "    if (id=='"+classAssignment.getDateId()+"') bg='rgb(168,187,225)';";
+            ClassAssignment classAssignment = (iChange == null ? null : iChange.getCurrent(iClass));
+            if (classAssignment != null && classAssignment.hasDate())
+                ret += "    if (id=='" + classAssignment.getDateId() + "') bg='rgb(168,187,225)';";
             ret += "    document.getElementById('d'+id).style.backgroundColor=bg;";
             if (iShowStudentConflicts)
-            	ret += "    document.getElementById('dc'+id).style.backgroundColor=bg;";
+                ret += "    document.getElementById('dc'+id).style.backgroundColor=bg;";
             ret += "}";
             ret += "function dateClick(source, id) { ";
             ret += "    displayLoading();";
-            ret += "    document.location='classInfo.action?op=Select&date='+id+'&noCacheTS=" + new Date().getTime()+"';";
+            ret += "    document.location='classInfo.action?op=Select&date='+id+'&noCacheTS=" + new Date().getTime()
+                    + "';";
             ret += "}";
             ret += "</script>";
             ret += "<table border='0' cellspacing='0' cellpadding='3'>";
             int idx = 0;
             int step = 5;
             for (ClassAssignment date : getDates()) {
-                boolean initial = (getClassOldAssignment()!=null && getClassOldAssignment().getDateId()!=null && getClassOldAssignment().getDateId().equals(date.getDateId()));
-                if ((idx%step)==0) {
-                    if (idx>0) ret +="</tr>";
+                boolean initial = (getClassOldAssignment() != null && getClassOldAssignment().getDateId() != null
+                        && getClassOldAssignment().getDateId().equals(date.getDateId()));
+                if ((idx % step) == 0) {
+                    if (idx > 0)
+                        ret += "</tr>";
                     ret += "<tr>";
                 }
                 String style = "";
-                if (classAssignment!=null && date.getDateId().equals(classAssignment.getDateId()))
+                if (classAssignment != null && date.getDateId().equals(classAssignment.getDateId()))
                     style += "background-color:rgb(168,187,225);";
                 if (initial)
                     style += "text-decoration:underline;";
-                String mouse = 
-                    "onMouseOver=\"dateOver(this,'"+date.getDateId()+"');\" "+
-                    "onMouseOut=\"dateOut('"+date.getDateId()+"');\" "+
-                    "onClick=\"dateClick(this,'"+date.getDateId()+"');\"";
+                String mouse = "onMouseOver=\"dateOver(this,'" + date.getDateId() + "');\" " +
+                        "onMouseOut=\"dateOut('" + date.getDateId() + "');\" " +
+                        "onClick=\"dateClick(this,'" + date.getDateId() + "');\"";
                 if (iShowStudentConflicts) {
-                	ret += "<td nowrap id='d"+date.getDateId()+"' " +
-                           (style.length()>0?"style='"+style+"' ":"")+mouse+">"+
-                           date.getDateNameHtml()+"</td>";
-                    if ((idx%step)<step-1)
+                    ret += "<td nowrap id='d" + date.getDateId() + "' " +
+                            (style.length() > 0 ? "style='" + style + "' " : "") + mouse + ">" +
+                            date.getDateNameHtml() + "</td>";
+                    if ((idx % step) < step - 1)
                         style += "border-right: #646464 1px dashed;";
-                    ret += "<td id='dc"+date.getDateId()+"' "+
-                            (style.length()>0?"style='"+style+"' ":"")+mouse+">"+
-                            (date instanceof ClassAssignmentInfo ? String.valueOf(((ClassAssignmentInfo)date).getNrStudentCounflicts()) : "") +"</td>";
+                    ret += "<td id='dc" + date.getDateId() + "' " +
+                            (style.length() > 0 ? "style='" + style + "' " : "") + mouse + ">" +
+                            (date instanceof ClassAssignmentInfo
+                                    ? String.valueOf(((ClassAssignmentInfo) date).getNrStudentCounflicts())
+                                    : "")
+                            + "</td>";
                 } else {
-                    if ((idx%step)<step-1)
+                    if ((idx % step) < step - 1)
                         style += "border-right: #646464 1px dashed;";
-                    ret += "<td nowrap id='d"+date.getDateId()+"' " +
-                            (style.length()>0?"style='"+style+"' ":"")+mouse+">"+
-                            date.getDateNameHtml()+"</td>";
+                    ret += "<td nowrap id='d" + date.getDateId() + "' " +
+                            (style.length() > 0 ? "style='" + style + "' " : "") + mouse + ">" +
+                            date.getDateNameHtml() + "</td>";
                 }
-                idx ++;
+                idx++;
             }
-            while ((idx%step)!=0) {
-            	if (iShowStudentConflicts)
-            		ret += "<td colspan='2'>&nbsp;</td>";
-            	else
-            		ret += "<td>&nbsp;</td>";
+            while ((idx % step) != 0) {
+                if (iShowStudentConflicts)
+                    ret += "<td colspan='2'>&nbsp;</td>";
+                else
+                    ret += "<td>&nbsp;</td>";
                 idx++;
             }
             ret += "</tr>";
             ret += "</table>";
             return ret;
         } catch (Exception e) {
-        	iForm.setMessage(e.getMessage());
-            sLog.error(e.getMessage(),e);
+            iForm.setMessage(e.getMessage());
+            sLog.error(e.getMessage(), e);
             return "";
         }
     }
-        
+
     public String getTimesTable() {
-    	try {
-    		String ret = "";
+        try {
+            String ret = "";
             ret += "<script language='javascript'>";
             ret += "function timeOver(source, id) { ";
             ret += "    document.getElementById('t'+id).style.backgroundColor='rgb(223,231,242)';";
             if (iShowStudentConflicts)
-            	ret += "    document.getElementById('c'+id).style.backgroundColor='rgb(223,231,242)';";
+                ret += "    document.getElementById('c'+id).style.backgroundColor='rgb(223,231,242)';";
             ret += "    source.style.cursor='hand';source.style.cursor='pointer';";
             ret += "}";
             ret += "function timeOut(id) { ";
             ret += "    var bg = 'transparent';";
-            ClassAssignment classAssignment = (iChange==null?null:iChange.getCurrent(iClass));
+            ClassAssignment classAssignment = (iChange == null ? null : iChange.getCurrent(iClass));
             if (classAssignment != null && classAssignment.hasTime())
-            	ret += "    if (id=='"+classAssignment.getTimeId()+"') bg='rgb(168,187,225)';";
+                ret += "    if (id=='" + classAssignment.getTimeId() + "') bg='rgb(168,187,225)';";
             ret += "    document.getElementById('t'+id).style.backgroundColor=bg;";
             if (iShowStudentConflicts)
-            	ret += "    document.getElementById('c'+id).style.backgroundColor=bg;";
+                ret += "    document.getElementById('c'+id).style.backgroundColor=bg;";
             ret += "}";
             ret += "function timeClick(source, id) { ";
             ret += "    displayLoading();";
-            ret += "    document.location='classInfo.action?op=Select&time='+id+'&noCacheTS=" + new Date().getTime()+"';";
+            ret += "    document.location='classInfo.action?op=Select&time='+id+'&noCacheTS=" + new Date().getTime()
+                    + "';";
             ret += "}";
             ret += "</script>";
             ret += "<table border='0' cellspacing='0' cellpadding='3'>";
             int idx = 0;
             int step = 5;
             for (ClassAssignment time : getTimes()) {
-                boolean initial = (getClassOldAssignment()!=null && getClassOldAssignment().getTimeId()!=null && getClassOldAssignment().getTimeId().equals(time.getTimeId()));
-                if ((idx%step)==0) {
-                    if (idx>0) ret +="</tr>";
+                boolean initial = (getClassOldAssignment() != null && getClassOldAssignment().getTimeId() != null
+                        && getClassOldAssignment().getTimeId().equals(time.getTimeId()));
+                if ((idx % step) == 0) {
+                    if (idx > 0)
+                        ret += "</tr>";
                     ret += "<tr>";
                 }
                 String style = "";
@@ -640,331 +746,361 @@ public class ClassInfoModel implements Serializable {
                     style += "background-color:rgb(168,187,225);";
                 if (initial)
                     style += "text-decoration:underline;";
-                String mouse = 
-                    "onMouseOver=\"timeOver(this,'"+time.getTimeId()+"');\" "+
-                    "onMouseOut=\"timeOut('"+time.getTimeId()+"');\" "+
-                    "onClick=\"timeClick(this,'"+time.getTimeId()+"');\"";
+                String mouse = "onMouseOver=\"timeOver(this,'" + time.getTimeId() + "');\" " +
+                        "onMouseOut=\"timeOut('" + time.getTimeId() + "');\" " +
+                        "onClick=\"timeClick(this,'" + time.getTimeId() + "');\"";
                 if (iShowStudentConflicts) {
-                	ret += "<td nowrap id='t"+time.getTimeId()+"' " +
-                           (style.length()>0?"style='"+style+"' ":"")+mouse+">"+
-                           time.getTime().getLongNameHtml()+"</td>";
-                    if ((idx%step)<step-1)
+                    ret += "<td nowrap id='t" + time.getTimeId() + "' " +
+                            (style.length() > 0 ? "style='" + style + "' " : "") + mouse + ">" +
+                            time.getTime().getLongNameHtml() + "</td>";
+                    if ((idx % step) < step - 1)
                         style += "border-right: #646464 1px dashed;";
-                    ret += "<td id='c"+time.getTimeId()+"' "+
-                            (style.length()>0?"style='"+style+"' ":"")+mouse+">"+
-                            ((ClassAssignmentInfo)time).getNrStudentCounflicts()+"</td>";
+                    ret += "<td id='c" + time.getTimeId() + "' " +
+                            (style.length() > 0 ? "style='" + style + "' " : "") + mouse + ">" +
+                            ((ClassAssignmentInfo) time).getNrStudentCounflicts() + "</td>";
                 } else {
-                    if ((idx%step)<step-1)
+                    if ((idx % step) < step - 1)
                         style += "border-right: #646464 1px dashed;";
-                    ret += "<td nowrap id='t"+time.getTimeId()+"' " +
-                            (style.length()>0?"style='"+style+"' ":"")+mouse+">"+
-                            time.getTime().getLongNameHtml()+"</td>";
+                    ret += "<td nowrap id='t" + time.getTimeId() + "' " +
+                            (style.length() > 0 ? "style='" + style + "' " : "") + mouse + ">" +
+                            time.getTime().getLongNameHtml() + "</td>";
                 }
-                idx ++;
+                idx++;
             }
             if (classAssignment != null) {
-                if ((idx%step)==0) {
-                    if (idx>0) ret +="</tr>";
+                if ((idx % step) == 0) {
+                    if (idx > 0)
+                        ret += "</tr>";
                     ret += "<tr>";
                 }
                 String style = "font-style:italic; color:#c81e14;";
-                String mouse = 
-                    "onMouseOver=\"timeOver(this,'-1');\" "+
-                    "onMouseOut=\"timeOut('-1');\" "+
-                    "onClick=\"timeClick(this,'-1');\"";
+                String mouse = "onMouseOver=\"timeOver(this,'-1');\" " +
+                        "onMouseOut=\"timeOut('-1');\" " +
+                        "onClick=\"timeClick(this,'-1');\"";
                 if (iShowStudentConflicts) {
-                	ret += "<td nowrap id='t-1' " +
-                           (style.length()>0?"style='"+style+"' ":"")+mouse+">not-assigned</td>";
-                    if ((idx%step)<step-1)
+                    ret += "<td nowrap id='t-1' " +
+                            (style.length() > 0 ? "style='" + style + "' " : "") + mouse + ">not-assigned</td>";
+                    if ((idx % step) < step - 1)
                         style += "border-right: #646464 1px dashed;";
-                    ret += "<td id='c-1' "+
-                            (style.length()>0?"style='"+style+"' ":"")+mouse+"></td>";
+                    ret += "<td id='c-1' " +
+                            (style.length() > 0 ? "style='" + style + "' " : "") + mouse + "></td>";
                 } else {
-                    if ((idx%step)<step-1)
+                    if ((idx % step) < step - 1)
                         style += "border-right: #646464 1px dashed;";
                     ret += "<td nowrap id='t-1' " +
-                            (style.length()>0?"style='"+style+"' ":"")+mouse+">not-assigned</td>";
+                            (style.length() > 0 ? "style='" + style + "' " : "") + mouse + ">not-assigned</td>";
                 }
-                idx ++;
+                idx++;
             }
-            while ((idx%step)!=0) {
-            	if (iShowStudentConflicts)
-            		ret += "<td colspan='2'>&nbsp;</td>";
-            	else
-            		ret += "<td>&nbsp;</td>";
+            while ((idx % step) != 0) {
+                if (iShowStudentConflicts)
+                    ret += "<td colspan='2'>&nbsp;</td>";
+                else
+                    ret += "<td>&nbsp;</td>";
                 idx++;
             }
             ret += "</tr>";
             ret += "</table>";
-            
+
             return ret;
         } catch (Exception e) {
-        	iForm.setMessage(e.getMessage());
-            sLog.error(e.getMessage(),e);
+            iForm.setMessage(e.getMessage());
+            sLog.error(e.getMessage(), e);
             return "";
         }
-/*    	
-        try {
-            WebTable table = new WebTable(8, "Available Times for "+getClazz().getClassName(), "classInfo.action?op=Reorder&pord=%%", 
-                    new String[] {"Time"},
-                    new String[] {"left"},
-                    new boolean[] { true});
-            ClassAssignmentInfo current = getClassAssignment();
-            for (ClassAssignmentInfo time : getTimes()) {
-                boolean initial = (getClassOldAssignment()!=null && getClassOldAssignment().getTimeId()!=null && getClassOldAssignment().getTimeId().equals(time.getTimeId()));
-                WebTable.WebTableLine line = table.addLine(
-                   "onClick=\"displayLoading();document.location='classInfo.action?op=Select&time="+time.getTimeId()+"';\"",
-                   new String[] {
-                        (initial?"<u>":"")+time.getTime().getLongNameHtml()+(initial?"</u>":"")
-                    }, new Comparable[] {
-                        time.getTime()
-                    });
-                ClassAssignment ClassAssignment = (iChange==null?null:iChange.getCurrent(iClass));
-                if ((isClassAssigned() || ClassAssignment!=null) && time.getTimeId().equals((ClassAssignment==null?getClassAssignment():ClassAssignment).getTimeId())) {
-                    line.setBgColor("rgb(168,187,225)");
+        /*
+         * try {
+         * WebTable table = new WebTable(8,
+         * "Available Times for "+getClazz().getClassName(),
+         * "classInfo.action?op=Reorder&pord=%%",
+         * new String[] {"Time"},
+         * new String[] {"left"},
+         * new boolean[] { true});
+         * ClassAssignmentInfo current = getClassAssignment();
+         * for (ClassAssignmentInfo time : getTimes()) {
+         * boolean initial = (getClassOldAssignment()!=null &&
+         * getClassOldAssignment().getTimeId()!=null &&
+         * getClassOldAssignment().getTimeId().equals(time.getTimeId()));
+         * WebTable.WebTableLine line = table.addLine(
+         * "onClick=\"displayLoading();document.location='classInfo.action?op=Select&time="
+         * +time.getTimeId()+"';\"",
+         * new String[] {
+         * (initial?"<u>":"")+time.getTime().getLongNameHtml()+(initial?"</u>":"")
+         * }, new Comparable[] {
+         * time.getTime()
+         * });
+         * ClassAssignment ClassAssignment =
+         * (iChange==null?null:iChange.getCurrent(iClass));
+         * if ((isClassAssigned() || ClassAssignment!=null) &&
+         * time.getTimeId().equals((ClassAssignment==null?getClassAssignment():
+         * ClassAssignment).getTimeId())) {
+         * line.setBgColor("rgb(168,187,225)");
+         * }
+         * }
+         * return table.printTable(iTimesTableOrd);
+         * } catch (Exception e) {
+         * Debug.error(e);
+         * return null;
+         * }
+         */
+    }
+
+    public TreeSet<StudentConflict> getStudentConflicts() {
+        TreeSet<StudentConflict> ret = new TreeSet();
+        if (iChange != null) {
+            HashSet<String> ids = new HashSet();
+            for (ClassAssignmentInfo assignment : iChange.getAssignments()) {
+                for (StudentConflict conf : assignment.getStudentConflicts()) {
+                    String id = (assignment.getClassId().compareTo(conf.getOtherClass().getClassId()) < 0
+                            ? assignment.getClassId() + ":" + conf.getOtherClass().getClassId()
+                            : conf.getOtherClass().getClassId() + ":" + assignment.getClassId());
+                    if (ids.add(id))
+                        ret.add(conf);
                 }
             }
-            return table.printTable(iTimesTableOrd);
-        } catch (Exception e) {
-            Debug.error(e);
-            return null;
+        } else if (getClassAssignment() != null) {
+            ret.addAll(getClassAssignment().getStudentConflicts());
         }
-        */
+        return ret;
     }
-    
-    public TreeSet<StudentConflict> getStudentConflicts() {
-    	TreeSet<StudentConflict> ret = new TreeSet();
-    	if (iChange!=null) {
-    		HashSet<String> ids = new HashSet();
-    		for (ClassAssignmentInfo assignment:iChange.getAssignments()) {
-    			for (StudentConflict conf:assignment.getStudentConflicts()) {
-    				String id = (assignment.getClassId().compareTo(conf.getOtherClass().getClassId())<0?
-    						assignment.getClassId()+":"+conf.getOtherClass().getClassId():
-    			            conf.getOtherClass().getClassId()+":"+assignment.getClassId());
-    				if (ids.add(id)) ret.add(conf);
-    			}
-    		}
-    	} else if (getClassAssignment()!=null) {
-    		ret.addAll(getClassAssignment().getStudentConflicts());
-    	}
-    	return ret;
-    }
-    
+
     public String getStudentConflictTable() {
         String ret = "<table border='0' width='100%' cellspacing='0' cellpadding='3'>";
         ret += "<tr>";
-        ret += "<td><i>"+MSG.columnStudentConflicts()+"</i></td>";
-        ret += "<td><i>"+MSG.columnClass()+"</i></td>";
-        ret += "<td><i>"+MSG.columnAssignedDatePattern()+"</i></td>";
-        ret += "<td><i>"+MSG.columnAssignedTime()+"</i></td>";
-        ret += "<td><i>"+MSG.columnAssignedRoom()+"</i></td>";
+        ret += "<td><i>" + MSG.columnStudentConflicts() + "</i></td>";
+        ret += "<td><i>" + MSG.columnClass() + "</i></td>";
+        ret += "<td><i>" + MSG.columnAssignedDatePattern() + "</i></td>";
+        ret += "<td><i>" + MSG.columnAssignedTime() + "</i></td>";
+        ret += "<td><i>" + MSG.columnAssignedRoom() + "</i></td>";
         ret += "</tr>";
         boolean empty = true;
-        for (StudentConflict conf:getStudentConflicts()) {
-        	ret += conf.toHtml2();
-        	empty = false;
+        for (StudentConflict conf : getStudentConflicts()) {
+            ret += conf.toHtml2();
+            empty = false;
         }
-        if (empty) ret += "<tr><td colspan='5'><i>"+MSG.messageNoStudentConflicts()+"</i></td></tr>";
+        if (empty)
+            ret += "<tr><td colspan='5'><i>" + MSG.messageNoStudentConflicts() + "</i></td></tr>";
         ret += "</table>";
         return ret;
     }
-    
+
     public boolean getShowDates() {
-    	return getDates().size() > 1;
+        return getDates().size() > 1;
     }
-    
+
     public Collection<ClassAssignment> getDates() {
-    	if (iDates == null) {
-    		iDates = new Vector<ClassAssignment>();
+        if (iDates == null) {
+            iDates = new Vector<ClassAssignment>();
             Class_ clazz = getClazz().getClazz();
             DatePattern datePattern = clazz.effectiveDatePattern();
-            if (datePattern==null) {
-            	iForm.setMessage(MSG.messageClassHasNoDatePatternSelected(getClazz().getClassName()));
-            	return iTimes;
+            if (datePattern == null) {
+                iForm.setMessage(MSG.messageClassHasNoDatePatternSelected(getClazz().getClassName()));
+                return iTimes;
             }
             ClassTimeInfo time = (getClassAssignment() == null ? null : getClassAssignment().getTime());
             if (datePattern.isPatternSet()) {
-            	Set<DatePatternPref> datePatternPrefs = (Set<DatePatternPref>)clazz.effectivePreferences(DatePatternPref.class);
-            	boolean hasReq = false;
-            	for (DatePatternPref p: datePatternPrefs) {
-            		if (PreferenceLevel.sRequired.equals(p.getPrefLevel().getPrefProlog())) { hasReq = true; break; }
-            	}
-            	for (DatePattern child: datePattern.findChildren()) {
-            		String pr = PreferenceLevel.sNeutral;
-            		for (DatePatternPref p: datePatternPrefs) {
-            			if (p.getDatePattern().equals(child)) pr = p.getPrefLevel().getPrefProlog();
-            		}
-            		int prVal = 0;
-            		if (!PreferenceLevel.sNeutral.equals(pr) && !PreferenceLevel.sRequired.equals(pr)) {
-            			prVal = PreferenceLevel.prolog2int(pr);
-            		}
-        			if (hasReq && !PreferenceLevel.sRequired.equals(pr)) prVal += 100;
-        			if (PreferenceLevel.sProhibited.equals(pr)) prVal += 100;
-        			if (iShowStudentConflicts && time != null) {
-            			iDates.add(new ClassAssignmentInfo(
-                    			clazz,
-                    			time,
-                    			new ClassDateInfo(
-                            			child.getUniqueId(),
-                            			clazz.getUniqueId(),
-                            			child.getName(),
-                            			child.getPatternBitSet(),
-                            			prVal),
-                            	null,
-                            	isUseRealStudents(), iConflicts));
-        			} else {
-            			iDates.add(new ClassAssignment(
-                    			clazz,
-                    			null,
-                    			new ClassDateInfo(
-                            			child.getUniqueId(),
-                            			clazz.getUniqueId(),
-                            			child.getName(),
-                            			child.getPatternBitSet(),
-                            			prVal),
-                            	null));
-        			}
-            	}
+                Set<DatePatternPref> datePatternPrefs = (Set<DatePatternPref>) clazz
+                        .effectivePreferences(DatePatternPref.class);
+                boolean hasReq = false;
+                for (DatePatternPref p : datePatternPrefs) {
+                    if (PreferenceLevel.sRequired.equals(p.getPrefLevel().getPrefProlog())) {
+                        hasReq = true;
+                        break;
+                    }
+                }
+                for (DatePattern child : datePattern.findChildren()) {
+                    String pr = PreferenceLevel.sNeutral;
+                    for (DatePatternPref p : datePatternPrefs) {
+                        if (p.getDatePattern().equals(child))
+                            pr = p.getPrefLevel().getPrefProlog();
+                    }
+                    int prVal = 0;
+                    if (!PreferenceLevel.sNeutral.equals(pr) && !PreferenceLevel.sRequired.equals(pr)) {
+                        prVal = PreferenceLevel.prolog2int(pr);
+                    }
+                    if (hasReq && !PreferenceLevel.sRequired.equals(pr))
+                        prVal += 100;
+                    if (PreferenceLevel.sProhibited.equals(pr))
+                        prVal += 100;
+                    if (iShowStudentConflicts && time != null) {
+                        iDates.add(new ClassAssignmentInfo(
+                                clazz,
+                                time,
+                                new ClassDateInfo(
+                                        child.getUniqueId(),
+                                        clazz.getUniqueId(),
+                                        child.getName(),
+                                        child.getPatternBitSet(),
+                                        prVal),
+                                null,
+                                isUseRealStudents(), iConflicts));
+                    } else {
+                        iDates.add(new ClassAssignment(
+                                clazz,
+                                null,
+                                new ClassDateInfo(
+                                        child.getUniqueId(),
+                                        clazz.getUniqueId(),
+                                        child.getName(),
+                                        child.getPatternBitSet(),
+                                        prVal),
+                                null));
+                    }
+                }
             } else {
-            	if (iShowStudentConflicts && time != null) {
-                	iDates.add(new ClassAssignmentInfo(
-                			clazz,
-                			time,
-                			new ClassDateInfo(
-                        			datePattern.getUniqueId(),
-                        			clazz.getUniqueId(),
-                        			datePattern.getName(),
-                        			datePattern.getPatternBitSet(),
-                        			PreferenceLevel.sIntLevelNeutral),
-                        	null,
-                        	isUseRealStudents(), iConflicts));
-            	} else {
-                	iDates.add(new ClassAssignment(
-                			clazz,
-                			null,
-                			new ClassDateInfo(
-                        			datePattern.getUniqueId(),
-                        			clazz.getUniqueId(),
-                        			datePattern.getName(),
-                        			datePattern.getPatternBitSet(),
-                        			PreferenceLevel.sIntLevelNeutral),
-                        	null));            		
-            	}
+                if (iShowStudentConflicts && time != null) {
+                    iDates.add(new ClassAssignmentInfo(
+                            clazz,
+                            time,
+                            new ClassDateInfo(
+                                    datePattern.getUniqueId(),
+                                    clazz.getUniqueId(),
+                                    datePattern.getName(),
+                                    datePattern.getPatternBitSet(),
+                                    PreferenceLevel.sIntLevelNeutral),
+                            null,
+                            isUseRealStudents(), iConflicts));
+                } else {
+                    iDates.add(new ClassAssignment(
+                            clazz,
+                            null,
+                            new ClassDateInfo(
+                                    datePattern.getUniqueId(),
+                                    clazz.getUniqueId(),
+                                    datePattern.getName(),
+                                    datePattern.getPatternBitSet(),
+                                    PreferenceLevel.sIntLevelNeutral),
+                            null));
+                }
             }
-    	}
-    	return iDates;
+        }
+        return iDates;
     }
 
     public Collection<ClassAssignment> getTimes() {
-        if (iTimes==null) {
+        if (iTimes == null) {
             Class_ clazz = getClazz().getClazz();
             Set timePrefs = clazz.effectivePreferences(TimePref.class);
             if (timePrefs.isEmpty()) {
-            	iForm.setMessage(MSG.messageClassHasNoTimePatternSelected(getClazz().getClassName()));
-            	return iTimes;
+                iForm.setMessage(MSG.messageClassHasNoTimePatternSelected(getClazz().getClassName()));
+                return iTimes;
             }
             ClassDateInfo date = getAssignedDate();
             if (date == null) {
-            	Collection<ClassAssignment> dates = getDates();
+                Collection<ClassAssignment> dates = getDates();
                 if (dates != null && !dates.isEmpty())
-                	date = dates.iterator().next().getDate();
+                    date = dates.iterator().next().getDate();
             }
             if (date == null) {
-            	iForm.setMessage(MSG.messageClassHasNoDatePatternSelected(getClazz().getClassName()));
-            	return iTimes;
+                iForm.setMessage(MSG.messageClassHasNoDatePatternSelected(getClazz().getClassName()));
+                return iTimes;
             }
             iTimes = getTimes(date);
             if (iTimes.isEmpty())
-            	iForm.setMessage(MSG.messageClassHasNoAvailableTime(getClazz().getClassName()));
+                iForm.setMessage(MSG.messageClassHasNoAvailableTime(getClazz().getClassName()));
         }
         return iTimes;
     }
-    
+
     public Collection<ClassAssignment> getAllTimes() {
-    	Vector<ClassAssignment> times = new Vector<ClassAssignment>();
+        Vector<ClassAssignment> times = new Vector<ClassAssignment>();
         Class_ clazz = getClazz().getClazz();
         DatePattern datePattern = clazz.effectiveDatePattern();
-        if (datePattern == null) return times;
+        if (datePattern == null)
+            return times;
         if (datePattern.isPatternSet()) {
-        	Set<DatePatternPref> datePatternPrefs = (Set<DatePatternPref>)clazz.effectivePreferences(DatePatternPref.class);
-        	boolean hasReq = false;
-        	for (DatePatternPref p: datePatternPrefs) {
-        		if (PreferenceLevel.sRequired.equals(p.getPrefLevel().getPrefProlog())) { hasReq = true; break; }
-        	}
-        	for (DatePattern child: datePattern.findChildren()) {
-        		String pr = PreferenceLevel.sNeutral;
-        		for (DatePatternPref p: datePatternPrefs) {
-        			if (p.getDatePattern().equals(child)) pr = p.getPrefLevel().getPrefProlog();
-        		}
-        		int prVal = 0;
-        		if (!PreferenceLevel.sNeutral.equals(pr) && !PreferenceLevel.sRequired.equals(pr)) {
-        			prVal = PreferenceLevel.prolog2int(pr);
-        		}
-    			if (hasReq && !PreferenceLevel.sRequired.equals(pr)) prVal += 100;
-    			if (PreferenceLevel.sProhibited.equals(pr)) prVal += 100;
-    			times.addAll(getTimes(
-    					new ClassDateInfo(
-    							child.getUniqueId(),
-    	            			clazz.getUniqueId(),
-    	            			child.getName(),
-    	            			child.getPatternBitSet(),
-    	            			prVal)));
-        	}
+            Set<DatePatternPref> datePatternPrefs = (Set<DatePatternPref>) clazz
+                    .effectivePreferences(DatePatternPref.class);
+            boolean hasReq = false;
+            for (DatePatternPref p : datePatternPrefs) {
+                if (PreferenceLevel.sRequired.equals(p.getPrefLevel().getPrefProlog())) {
+                    hasReq = true;
+                    break;
+                }
+            }
+            for (DatePattern child : datePattern.findChildren()) {
+                String pr = PreferenceLevel.sNeutral;
+                for (DatePatternPref p : datePatternPrefs) {
+                    if (p.getDatePattern().equals(child))
+                        pr = p.getPrefLevel().getPrefProlog();
+                }
+                int prVal = 0;
+                if (!PreferenceLevel.sNeutral.equals(pr) && !PreferenceLevel.sRequired.equals(pr)) {
+                    prVal = PreferenceLevel.prolog2int(pr);
+                }
+                if (hasReq && !PreferenceLevel.sRequired.equals(pr))
+                    prVal += 100;
+                if (PreferenceLevel.sProhibited.equals(pr))
+                    prVal += 100;
+                times.addAll(getTimes(
+                        new ClassDateInfo(
+                                child.getUniqueId(),
+                                clazz.getUniqueId(),
+                                child.getName(),
+                                child.getPatternBitSet(),
+                                prVal)));
+            }
         } else {
-        	times.addAll(getTimes(
-					new ClassDateInfo(
-                			datePattern.getUniqueId(),
-                			clazz.getUniqueId(),
-                			datePattern.getName(),
-                			datePattern.getPatternBitSet(),
-                			PreferenceLevel.sIntLevelNeutral
-                			)));
+            times.addAll(getTimes(
+                    new ClassDateInfo(
+                            datePattern.getUniqueId(),
+                            clazz.getUniqueId(),
+                            datePattern.getName(),
+                            datePattern.getPatternBitSet(),
+                            PreferenceLevel.sIntLevelNeutral)));
         }
-    	return times;
+        return times;
     }
-    
+
     public Collection<ClassAssignment> getTimes(ClassDateInfo date) {
         Class_ clazz = getClazz().getClazz();
         DatePattern datePattern = date.getDatePattern();
         Vector<ClassAssignment> times = new Vector<ClassAssignment>();
         boolean onlyReq = false;
         Set timePrefs = clazz.effectivePreferences(TimePref.class);
-        for (Iterator i1=timePrefs.iterator();i1.hasNext();) {
-        	TimePref timePref = (TimePref)i1.next();
-        	TimePatternModel pattern = timePref.getTimePatternModel();
-        	if (pattern.isExactTime() || pattern.countPreferences(PreferenceLevel.sRequired)>0)
-        		onlyReq = true;
+        for (Iterator i1 = timePrefs.iterator(); i1.hasNext();) {
+            TimePref timePref = (TimePref) i1.next();
+            TimePatternModel pattern = timePref.getTimePatternModel();
+            if (pattern.isExactTime() || pattern.countPreferences(PreferenceLevel.sRequired) > 0)
+                onlyReq = true;
         }
         if (onlyReq) {
-        	sLog.debug("Class "+getClazz().getClassName()+" has required times");
+            sLog.debug("Class " + getClazz().getClassName() + " has required times");
         }
-		DurationModel dm = clazz.getSchedulingSubpart().getInstrOfferingConfig().getDurationModel();
-		EventDateMapping.Class2EventDateMap class2eventDates = EventDateMapping.getMapping(clazz.getSessionId());
-        for (Iterator i1=timePrefs.iterator();i1.hasNext();) {
-        	TimePref timePref = (TimePref)i1.next();
-        	TimePatternModel pattern = timePref.getTimePatternModel();
-        	if (pattern.isExactTime()) {
-    			int minsPerMeeting = dm.getExactTimeMinutesPerMeeting(clazz.getSchedulingSubpart().getMinutesPerWk(), datePattern, pattern.getExactDays());
-        		int length = ExactTimeMins.getNrSlotsPerMtg(minsPerMeeting);
-        		int breakTime = ExactTimeMins.getBreakTime(minsPerMeeting); 
-        		List<Date> dates = dm.getDates(clazz.getSchedulingSubpart().getMinutesPerWk(), datePattern, pattern.getExactDays(), minsPerMeeting, class2eventDates);
-        		ClassTimeInfo time = new ClassTimeInfo(clazz.getUniqueId(), pattern.getExactDays(),pattern.getExactStartSlot(),length,minsPerMeeting,PreferenceLevel.sIntLevelNeutral,timePref.getTimePattern(),date,breakTime,dates);
-        		if (iShowStudentConflicts)
-        			times.add(new ClassAssignmentInfo(clazz, time, date, null, (iChange==null?null:iChange.getAssignmentTable()), isUseRealStudents(), iConflicts));
-        		else
-        			times.add(new ClassAssignment(clazz, time, date, null));
+        DurationModel dm = clazz.getSchedulingSubpart().getInstrOfferingConfig().getDurationModel();
+        EventDateMapping.Class2EventDateMap class2eventDates = EventDateMapping.getMapping(clazz.getSessionId());
+        for (Iterator i1 = timePrefs.iterator(); i1.hasNext();) {
+            TimePref timePref = (TimePref) i1.next();
+            TimePatternModel pattern = timePref.getTimePatternModel();
+            if (pattern.isExactTime()) {
+                int minsPerMeeting = dm.getExactTimeMinutesPerMeeting(clazz.getSchedulingSubpart().getMinutesPerWk(),
+                        datePattern, pattern.getExactDays());
+                int length = ExactTimeMins.getNrSlotsPerMtg(minsPerMeeting);
+                int breakTime = ExactTimeMins.getBreakTime(minsPerMeeting);
+                List<Date> dates = dm.getDates(clazz.getSchedulingSubpart().getMinutesPerWk(), datePattern,
+                        pattern.getExactDays(), minsPerMeeting, class2eventDates);
+                ClassTimeInfo time = new ClassTimeInfo(clazz.getUniqueId(), pattern.getExactDays(),
+                        pattern.getExactStartSlot(), length, minsPerMeeting, PreferenceLevel.sIntLevelNeutral,
+                        timePref.getTimePattern(), date, breakTime, dates);
+                if (iShowStudentConflicts)
+                    times.add(new ClassAssignmentInfo(clazz, time, date, null,
+                            (iChange == null ? null : iChange.getAssignmentTable()), isUseRealStudents(), iConflicts));
+                else
+                    times.add(new ClassAssignment(clazz, time, date, null));
                 continue;
-        	}
+            }
 
-            for (int time=0;time<pattern.getNrTimes(); time++) {
-            	times: for (int day=0;day<pattern.getNrDays(); day++) {
-            		if (!dm.isValidSelection(clazz.getSchedulingSubpart().getMinutesPerWk(), datePattern, timePref.getTimePattern(), pattern.getDayCode(day)))
-            			continue;
-                    String pref = pattern.getPreference(day,time);
+            for (int time = 0; time < pattern.getNrTimes(); time++) {
+                times: for (int day = 0; day < pattern.getNrDays(); day++) {
+                    if (!dm.isValidSelection(clazz.getSchedulingSubpart().getMinutesPerWk(), datePattern,
+                            timePref.getTimePattern(), pattern.getDayCode(day)))
+                        continue;
+                    String pref = pattern.getPreference(day, time);
                     if (onlyReq && !pref.equals(PreferenceLevel.sRequired)) {
                         pref = PreferenceLevel.sProhibited;
                     }
-                    List<Date> dates = dm.getDates(clazz.getSchedulingSubpart().getMinutesPerWk(), datePattern, pattern.getDayCode(day), timePref.getTimePattern().getMinPerMtg(), class2eventDates);
+                    List<Date> dates = dm.getDates(clazz.getSchedulingSubpart().getMinutesPerWk(), datePattern,
+                            pattern.getDayCode(day), timePref.getTimePattern().getMinPerMtg(), class2eventDates);
                     ClassTimeInfo loc = new ClassTimeInfo(
                             clazz.getUniqueId(),
                             pattern.getDayCode(day),
@@ -976,581 +1112,664 @@ public class ClassInfoModel implements Serializable {
                             date,
                             pattern.getBreakTime(),
                             dates);
-                    
-                    if (iChange!=null) {
+
+                    if (iChange != null) {
                         for (ClassAssignment current : iChange.getAssignments()) {
-                        	if (!current.getClassId().equals(getClazz().getClassId())) {
-                        		boolean canConflict = false;
-                        		if (current.getParents().contains(getClazz().getClassId())) canConflict = true;
-                        		if (getClazz().getParents().contains(current.getClassId())) canConflict = true;
-                        		if (current.getConfligId().equals(getClazz().getConfligId()) && current.isSingleClass()) canConflict = true;
-                        		if (current.shareInstructor(getClazz())) canConflict = true;
-                        		if (canConflict && loc.overlaps(current.getTime())) continue times;
-                        	}
+                            if (!current.getClassId().equals(getClazz().getClassId())) {
+                                boolean canConflict = false;
+                                if (current.getParents().contains(getClazz().getClassId()))
+                                    canConflict = true;
+                                if (getClazz().getParents().contains(current.getClassId()))
+                                    canConflict = true;
+                                if (current.getConfligId().equals(getClazz().getConfligId()) && current.isSingleClass())
+                                    canConflict = true;
+                                if (current.shareInstructor(getClazz()))
+                                    canConflict = true;
+                                if (canConflict && loc.overlaps(current.getTime()))
+                                    continue times;
+                            }
                         }
                     }
-                    
+
                     if (iShowStudentConflicts)
-                    	 times.add(new ClassAssignmentInfo(clazz, loc, date, null, (iChange==null?null:iChange.getAssignmentTable()), isUseRealStudents(), iConflicts));
+                        times.add(new ClassAssignmentInfo(clazz, loc, date, null,
+                                (iChange == null ? null : iChange.getAssignmentTable()), isUseRealStudents(),
+                                iConflicts));
                     else
-                    	times.add(new ClassAssignment(clazz, loc, date, null));
+                        times.add(new ClassAssignment(clazz, loc, date, null));
                 }
             }
         }
-        
+
         Date[] bounds = DatePattern.getBounds(clazz.getSessionId());
         boolean changePast = ApplicationProperty.ClassAssignmentChangePastMeetings.isTrue();
         boolean ignorePast = ApplicationProperty.ClassAssignmentIgnorePastMeetings.isTrue();
         Calendar cal = Calendar.getInstance(Locale.US);
-		cal.setTime(new Date());
-		cal.set(Calendar.HOUR_OF_DAY, 0);
-		cal.set(Calendar.MINUTE, 0);
-		cal.set(Calendar.SECOND, 0);
-		Date today = cal.getTime();
-		String nameFormat = (getSessionContext() == null ? "last-initial" : UserProperty.NameFormat.get(getSessionContext().getUser()));
-        if (RoomAvailability.getInstance()!=null) {
-        	for (ClassInstructor ci: clazz.getClassInstructors()) {
-        		if (!ci.getLead()) continue;
-        		Collection<TimeBlock> blocks = RoomAvailability.getInstance().getInstructorAvailability(ci.getInstructor().getUniqueId(), 
-        				bounds[0], bounds[1], 
-        				RoomAvailabilityInterface.sClassType);
-        		if (blocks != null && !blocks.isEmpty()) {
-        			Collection<TimeBlock> timesToCheck = null;
-            		if (!changePast || ignorePast) {
-            			timesToCheck = new Vector();
-            			for (TimeBlock time: blocks) {
-            				if (!time.getEndTime().before(today))
-            					timesToCheck.add(time);
-            			}
-            		} else {
-            			timesToCheck = blocks;
-            		}
-            		for (Iterator<ClassAssignment> i = times.iterator(); i.hasNext(); ) {
-            			ClassAssignment ca = i.next();
-            			TimeBlock time = ca.getTime().overlaps(timesToCheck);
-                		if (time!=null) {
-            				sLog.info(MSG.messageInstructroNotAvailable(ci.getInstructor().getName(nameFormat), ca.getTime().getLongName(), time.toString()));
-            				i.remove();
-            			}
-            		}
-        		}
-        	}
+        cal.setTime(new Date());
+        cal.set(Calendar.HOUR_OF_DAY, 0);
+        cal.set(Calendar.MINUTE, 0);
+        cal.set(Calendar.SECOND, 0);
+        Date today = cal.getTime();
+        String nameFormat = (getSessionContext() == null ? "last-initial"
+                : UserProperty.NameFormat.get(getSessionContext().getUser()));
+        if (RoomAvailability.getInstance() != null) {
+            for (ClassInstructor ci : clazz.getClassInstructors()) {
+                if (!ci.getLead())
+                    continue;
+                Collection<TimeBlock> blocks = RoomAvailability.getInstance().getInstructorAvailability(
+                        ci.getInstructor().getUniqueId(),
+                        bounds[0], bounds[1],
+                        RoomAvailabilityInterface.sClassType);
+                if (blocks != null && !blocks.isEmpty()) {
+                    Collection<TimeBlock> timesToCheck = null;
+                    if (!changePast || ignorePast) {
+                        timesToCheck = new Vector();
+                        for (TimeBlock time : blocks) {
+                            if (!time.getEndTime().before(today))
+                                timesToCheck.add(time);
+                        }
+                    } else {
+                        timesToCheck = blocks;
+                    }
+                    for (Iterator<ClassAssignment> i = times.iterator(); i.hasNext();) {
+                        ClassAssignment ca = i.next();
+                        TimeBlock time = ca.getTime().overlaps(timesToCheck);
+                        if (time != null) {
+                            sLog.info(MSG.messageInstructroNotAvailable(ci.getInstructor().getName(nameFormat),
+                                    ca.getTime().getLongName(), time.toString()));
+                            i.remove();
+                        }
+                    }
+                }
+            }
         }
-        for (ClassInstructor ci: clazz.getClassInstructors()) {
-    		if (!ci.getLead() || !ci.getInstructor().hasUnavailabilities()) continue;
-    		Collection<TimeBlock> blocks = ci.getInstructor().listUnavailableDays();
-    		if (blocks != null && !blocks.isEmpty()) {
-    			Collection<TimeBlock> timesToCheck = null;
-        		if (!changePast || ignorePast) {
-        			timesToCheck = new Vector();
-        			for (TimeBlock time: blocks) {
-        				if (!time.getEndTime().before(today))
-        					timesToCheck.add(time);
-        			}
-        		} else {
-        			timesToCheck = blocks;
-        		}
-        		for (Iterator<ClassAssignment> i = times.iterator(); i.hasNext(); ) {
-        			ClassAssignment ca = i.next();
-        			TimeBlock time = ca.getTime().overlaps(timesToCheck);
-            		if (time!=null) {
-        				sLog.info(MSG.messageInstructroNotAvailable(ci.getInstructor().getName(nameFormat), ca.getTime().getLongName(), time.toString()));
-        				i.remove();
-        			}
-        		}
-    		}
+        for (ClassInstructor ci : clazz.getClassInstructors()) {
+            if (!ci.getLead() || !ci.getInstructor().hasUnavailabilities())
+                continue;
+            Collection<TimeBlock> blocks = ci.getInstructor().listUnavailableDays();
+            if (blocks != null && !blocks.isEmpty()) {
+                Collection<TimeBlock> timesToCheck = null;
+                if (!changePast || ignorePast) {
+                    timesToCheck = new Vector();
+                    for (TimeBlock time : blocks) {
+                        if (!time.getEndTime().before(today))
+                            timesToCheck.add(time);
+                    }
+                } else {
+                    timesToCheck = blocks;
+                }
+                for (Iterator<ClassAssignment> i = times.iterator(); i.hasNext();) {
+                    ClassAssignment ca = i.next();
+                    TimeBlock time = ca.getTime().overlaps(timesToCheck);
+                    if (time != null) {
+                        sLog.info(MSG.messageInstructroNotAvailable(ci.getInstructor().getName(nameFormat),
+                                ca.getTime().getLongName(), time.toString()));
+                        i.remove();
+                    }
+                }
+            }
         }
         return times;
     }
-    
-    Hashtable<Long,Hashtable> iRoomPreferences = new Hashtable();
+
+    Hashtable<Long, Hashtable> iRoomPreferences = new Hashtable();
+
     private PreferenceLevel getRoomPreference(Department department, Long locationId) {
-    	Hashtable roomPreferencesThisDept = iRoomPreferences.get(department.getUniqueId());
-    	if (roomPreferencesThisDept==null) {
-    		roomPreferencesThisDept = new Hashtable();
-    		iRoomPreferences.put(department.getUniqueId(), roomPreferencesThisDept);
-    		for (Iterator k=department.getPreferences(RoomPref.class).iterator();k.hasNext();) {
-    			RoomPref pref = (RoomPref)k.next();
-    			roomPreferencesThisDept.put(pref.getRoom().getUniqueId(),pref.getPrefLevel());
-    		}
-    	}
-    	return (PreferenceLevel)roomPreferencesThisDept.get(locationId);
-    }
-    
-    protected List<Location> findAllRooms(Long sessionId, boolean roomDepts) {
-		String a = "", b = "";
-		if (iForm.getRoomFeatures()!=null && iForm.getRoomFeatures().length>0) {
-			for (int i=0;i<iForm.getRoomFeatures().length;i++) {
-				a+= ", GlobalRoomFeature f"+i;
-				b+= " and f"+i+".uniqueId="+iForm.getRoomFeatures()[i]+" and f"+i+" in elements(r.features)";
-			}
-		}
-        if (iForm.getRoomGroups()!=null && iForm.getRoomGroups().length>0) {
-            b+= " and (";
-            for (int i=0;i<iForm.getRoomGroups().length;i++) {
-                if (i>0) b+=" or";
-                a+= ", RoomGroup g"+i;
-                b+= " (g"+i+".uniqueId="+iForm.getRoomGroups()[i]+" and g"+i+" in elements(r.roomGroups))";
+        Hashtable roomPreferencesThisDept = iRoomPreferences.get(department.getUniqueId());
+        if (roomPreferencesThisDept == null) {
+            roomPreferencesThisDept = new Hashtable();
+            iRoomPreferences.put(department.getUniqueId(), roomPreferencesThisDept);
+            for (Iterator k = department.getPreferences(RoomPref.class).iterator(); k.hasNext();) {
+                RoomPref pref = (RoomPref) k.next();
+                roomPreferencesThisDept.put(pref.getRoom().getUniqueId(), pref.getPrefLevel());
             }
-            b+=")";
         }
-        if (iForm.getRoomTypes()!=null && iForm.getRoomTypes().length>0) {
-            b+= " and r.roomType.uniqueId in (";
-            for (int i=0;i<iForm.getRoomTypes().length;i++) {
-                if (i>0) b+=",";
-                b+= iForm.getRoomTypes()[i];
+        return (PreferenceLevel) roomPreferencesThisDept.get(locationId);
+    }
+
+    protected List<Location> findAllRooms(Long sessionId, boolean roomDepts) {
+        String a = "", b = "";
+        if (iForm.getRoomFeatures() != null && iForm.getRoomFeatures().length > 0) {
+            for (int i = 0; i < iForm.getRoomFeatures().length; i++) {
+                a += ", GlobalRoomFeature f" + i;
+                b += " and f" + i + ".uniqueId=" + iForm.getRoomFeatures()[i] + " and f" + i
+                        + " in elements(r.features)";
             }
-            b+=")";
+        }
+        if (iForm.getRoomGroups() != null && iForm.getRoomGroups().length > 0) {
+            b += " and (";
+            for (int i = 0; i < iForm.getRoomGroups().length; i++) {
+                if (i > 0)
+                    b += " or";
+                a += ", RoomGroup g" + i;
+                b += " (g" + i + ".uniqueId=" + iForm.getRoomGroups()[i] + " and g" + i + " in elements(r.roomGroups))";
+            }
+            b += ")";
+        }
+        if (iForm.getRoomTypes() != null && iForm.getRoomTypes().length > 0) {
+            b += " and r.roomType.uniqueId in (";
+            for (int i = 0; i < iForm.getRoomTypes().length; i++) {
+                if (i > 0)
+                    b += ",";
+                b += iForm.getRoomTypes()[i];
+            }
+            b += ")";
         }
         String query = null;
         if (roomDepts) {
-        	query = "select distinct r from Location r inner join r.roomDepts rd " + a + " where r.session.uniqueId = :sessionId " + b;
+            query = "select distinct r from Location r inner join r.roomDepts rd " + a
+                    + " where r.session.uniqueId = :sessionId " + b;
         } else {
-        	query = "select r from Location r " + a + " where r.session.uniqueId = :sessionId " + b;
+            query = "select r from Location r " + a + " where r.session.uniqueId = :sessionId " + b;
         }
-        return LocationDAO.getInstance().getSession().createQuery(query, Location.class).setParameter("sessionId", sessionId).setCacheable(true).list();
+        return LocationDAO.getInstance().getSession().createQuery(query, Location.class)
+                .setParameter("sessionId", sessionId).setCacheable(true).list();
     }
-    
-    protected Vector<ClassRoomInfo> findRooms(ClassTimeInfo period, int minRoomSize, int maxRoomSize, String filter, boolean allowConflicts, RoomBase showAllRooms) {
-    	Vector<ClassRoomInfo> rooms = new Vector<ClassRoomInfo>();
-        
+
+    protected Vector<ClassRoomInfo> findRooms(ClassTimeInfo period, int minRoomSize, int maxRoomSize, String filter,
+            boolean allowConflicts, RoomBase showAllRooms) {
+        Vector<ClassRoomInfo> rooms = new Vector<ClassRoomInfo>();
+
         Class_ clazz = getClazz().getClazz(Class_DAO.getInstance().getSession());
-        int nrRooms = (clazz.getNbrRooms()==null?1:clazz.getNbrRooms().intValue());
+        int nrRooms = (clazz.getNbrRooms() == null ? 1 : clazz.getNbrRooms().intValue());
         iRoomPreferences.clear();
 
         Set groupPrefs = clazz.effectivePreferences(RoomGroupPref.class);
         Set roomPrefs = clazz.effectivePreferences(RoomPref.class);
         Set bldgPrefs = clazz.effectivePreferences(BuildingPref.class);
         Set featurePrefs = clazz.effectivePreferences(RoomFeaturePref.class);
-                
-        if (nrRooms>0) {
-        	int minClassLimit = clazz.getExpectedCapacity().intValue();
-        	int maxClassLimit = clazz.getMaxExpectedCapacity().intValue();
-        	if (maxClassLimit<minClassLimit) maxClassLimit = minClassLimit;
-        	float room2limitRatio = clazz.getRoomRatio().floatValue();
-        	int roomCapacity = Math.round(minClassLimit<=0?room2limitRatio:room2limitRatio*minClassLimit);
-        	//TODO: Use parameters from the default solver configuration
-            int discouragedCapacity = (int)Math.round(0.99 * roomCapacity);
-            int stronglyDiscouragedCapacity = (int)Math.round(0.98 * roomCapacity);
-            
-    		Calendar cal = Calendar.getInstance(Locale.US);
-    		cal.setTime(new Date());
-    		cal.set(Calendar.HOUR_OF_DAY, 0);
-    		cal.set(Calendar.MINUTE, 0);
-    		cal.set(Calendar.SECOND, 0);
-    		Date today = cal.getTime();
 
-    		Date[] bounds = DatePattern.getBounds(clazz.getSessionId());
-    		
- 			Set availRooms = clazz.getAvailableRooms();
-        	rooms: for (Iterator i1=availRooms.iterator();i1.hasNext();) {
-        		Location room = (Location)i1.next();
-        		if (iForm.getRoomTypes()!=null && iForm.getRoomTypes().length>0) {
-        			boolean ok = false;
-        			for (int i=0;i<iForm.getRoomTypes().length;i++)
-        				if (room.getRoomType().getUniqueId().equals(iForm.getRoomTypes()[i])) {
-        					ok = true; break;
-        				}
-        			if (!ok) {
-        				i1.remove(); continue rooms;
-        			}
-        		}
-        		if (iForm.getRoomFeatures()!=null && iForm.getRoomFeatures().length>0) {
-            		for (int i=0;i<iForm.getRoomFeatures().length;i++)
-            			if (!room.hasFeature(iForm.getRoomFeatures()[i])) {
-            				i1.remove(); continue rooms;
-            			}
-        		}
-        		if (iForm.getRoomGroups()!=null && iForm.getRoomGroups().length>0) {
-        			for (int i=0;i<iForm.getRoomGroups().length;i++)
-        				if (room.hasGroup(iForm.getRoomGroups()[i])) continue rooms;
-        			i1.remove();
-        		}
-        	}
- 			
- 			Set allRooms = availRooms;
- 			if (showAllRooms != RoomBase.Departmental) {
- 				allRooms = new TreeSet(availRooms);
- 				allRooms.addAll(findAllRooms(getClazz().getClazz().getSessionId(), showAllRooms == RoomBase.Timetabling));
- 			}
- 			
- 			Long departmentId = getClazz().getClazz().getManagingDept().getUniqueId();
- 			
- 			Hashtable<Location,Integer> filteredRooms = new Hashtable();
- 			Set<Long> permIds = new HashSet();
-        	rooms: for (Iterator i1=allRooms.iterator();i1.hasNext();) {
-        		Location room = (Location)i1.next();
-        		boolean add=true;
-        		
-                if (minRoomSize>=0 && room.getCapacity()<minRoomSize) continue;
-                if (maxRoomSize>=0 && room.getCapacity()>maxRoomSize) continue;
-        		
-        		if (!match(room.getLabel(),filter)) continue;
-        		
-        		PreferenceCombination pref = new SumPreferenceCombination();
-        		
-        		if (showAllRooms != RoomBase.Departmental && !availRooms.contains(room)) pref.addPreferenceProlog(PreferenceLevel.sProhibited);
-        		
-        		RoomSharingModel sharingModel = room.getRoomSharingModel();
-                if (sharingModel!=null) {
-                	sharing: for (int d = 0; d<Constants.NR_DAYS; d++) {
-                		if ((Constants.DAY_CODES[d] & period.getDayCode())==0) continue;
-                		int startTime = period.getStartSlot();
-                		int endTime = (period.getStartSlot()+period.getLength()-1);
-                		for (int t = startTime; t<=endTime; t++) {
-                			Long px = Long.valueOf(sharingModel.getPreference(d,t));
-                			if (px.equals(RoomSharingModel.sNotAvailablePref)) {
-                				if (showAllRooms != RoomBase.Departmental) {
-                					pref.addPreferenceProlog(PreferenceLevel.sProhibited);
-                					break sharing;
-                				} else {
-                        			if (room.getLabel().equals(filter)) iForm.setMessage("Room "+room.getLabel()+" is not available for "+period.getLongName()+" due to the room sharing preferences.");
-                    				continue rooms;
-                				}
-                			}
-                			if (px.equals(RoomSharingModel.sFreeForAllPref)) continue;
-                			if (departmentId!=null && !departmentId.equals(px)) {
-                				if (showAllRooms != RoomBase.Departmental) {
-                					pref.addPreferenceProlog(PreferenceLevel.sProhibited);
-                					break sharing;
-                				} else {
-                        			if (room.getLabel().equals(filter)) iForm.setMessage("Room "+room.getLabel()+" is not available for "+period.getLongName()+" due to the room sharing preferences.");
-                					continue rooms;
-                				}
+        if (nrRooms > 0) {
+            int minClassLimit = clazz.getExpectedCapacity().intValue();
+            int maxClassLimit = clazz.getMaxExpectedCapacity().intValue();
+            if (maxClassLimit < minClassLimit)
+                maxClassLimit = minClassLimit;
+            float room2limitRatio = clazz.getRoomRatio().floatValue();
+            int roomCapacity = Math.round(minClassLimit <= 0 ? room2limitRatio : room2limitRatio * minClassLimit);
+            // TODO: Use parameters from the default solver configuration
+            int discouragedCapacity = (int) Math.round(0.99 * roomCapacity);
+            int stronglyDiscouragedCapacity = (int) Math.round(0.98 * roomCapacity);
+
+            Calendar cal = Calendar.getInstance(Locale.US);
+            cal.setTime(new Date());
+            cal.set(Calendar.HOUR_OF_DAY, 0);
+            cal.set(Calendar.MINUTE, 0);
+            cal.set(Calendar.SECOND, 0);
+            Date today = cal.getTime();
+
+            Date[] bounds = DatePattern.getBounds(clazz.getSessionId());
+
+            Set availRooms = clazz.getAvailableRooms();
+            rooms: for (Iterator i1 = availRooms.iterator(); i1.hasNext();) {
+                Location room = (Location) i1.next();
+                if (iForm.getRoomTypes() != null && iForm.getRoomTypes().length > 0) {
+                    boolean ok = false;
+                    for (int i = 0; i < iForm.getRoomTypes().length; i++)
+                        if (room.getRoomType().getUniqueId().equals(iForm.getRoomTypes()[i])) {
+                            ok = true;
+                            break;
+                        }
+                    if (!ok) {
+                        i1.remove();
+                        continue rooms;
+                    }
+                }
+                if (iForm.getRoomFeatures() != null && iForm.getRoomFeatures().length > 0) {
+                    for (int i = 0; i < iForm.getRoomFeatures().length; i++)
+                        if (!room.hasFeature(iForm.getRoomFeatures()[i])) {
+                            i1.remove();
+                            continue rooms;
+                        }
+                }
+                if (iForm.getRoomGroups() != null && iForm.getRoomGroups().length > 0) {
+                    for (int i = 0; i < iForm.getRoomGroups().length; i++)
+                        if (room.hasGroup(iForm.getRoomGroups()[i]))
+                            continue rooms;
+                    i1.remove();
+                }
+            }
+
+            Set allRooms = availRooms;
+            if (showAllRooms != RoomBase.Departmental) {
+                allRooms = new TreeSet(availRooms);
+                allRooms.addAll(
+                        findAllRooms(getClazz().getClazz().getSessionId(), showAllRooms == RoomBase.Timetabling));
+            }
+
+            Long departmentId = getClazz().getClazz().getManagingDept().getUniqueId();
+
+            Hashtable<Location, Integer> filteredRooms = new Hashtable();
+            Set<Long> permIds = new HashSet();
+            rooms: for (Iterator i1 = allRooms.iterator(); i1.hasNext();) {
+                Location room = (Location) i1.next();
+                boolean add = true;
+
+                if (minRoomSize >= 0 && room.getCapacity() < minRoomSize)
+                    continue;
+                if (maxRoomSize >= 0 && room.getCapacity() > maxRoomSize)
+                    continue;
+
+                if (!match(room.getLabel(), filter))
+                    continue;
+
+                PreferenceCombination pref = new SumPreferenceCombination();
+
+                if (showAllRooms != RoomBase.Departmental && !availRooms.contains(room))
+                    pref.addPreferenceProlog(PreferenceLevel.sProhibited);
+
+                RoomSharingModel sharingModel = room.getRoomSharingModel();
+                if (sharingModel != null) {
+                    sharing: for (int d = 0; d < Constants.NR_DAYS; d++) {
+                        if ((Constants.DAY_CODES[d] & period.getDayCode()) == 0)
+                            continue;
+                        int startTime = period.getStartSlot();
+                        int endTime = (period.getStartSlot() + period.getLength() - 1);
+                        for (int t = startTime; t <= endTime; t++) {
+                            Long px = Long.valueOf(sharingModel.getPreference(d, t));
+                            if (px.equals(RoomSharingModel.sNotAvailablePref)) {
+                                if (showAllRooms != RoomBase.Departmental) {
+                                    pref.addPreferenceProlog(PreferenceLevel.sProhibited);
+                                    break sharing;
+                                } else {
+                                    if (room.getLabel().equals(filter))
+                                        iForm.setMessage("Room " + room.getLabel() + " is not available for "
+                                                + period.getLongName() + " due to the room sharing preferences.");
+                                    continue rooms;
+                                }
+                            }
+                            if (px.equals(RoomSharingModel.sFreeForAllPref))
+                                continue;
+                            if (departmentId != null && !departmentId.equals(px)) {
+                                if (showAllRooms != RoomBase.Departmental) {
+                                    pref.addPreferenceProlog(PreferenceLevel.sProhibited);
+                                    break sharing;
+                                } else {
+                                    if (room.getLabel().equals(filter))
+                                        iForm.setMessage("Room " + room.getLabel() + " is not available for "
+                                                + period.getLongName() + " due to the room sharing preferences.");
+                                    continue rooms;
+                                }
                             }
                         }
                     }
                 }
 
-        		
-        		// --- group preference ----------
-        		PreferenceCombination groupPref = PreferenceCombination.getDefault();
-        		boolean reqGroup = false;
-        		for (Iterator i2=groupPrefs.iterator();i2.hasNext();) {
-        			RoomGroupPref p = (RoomGroupPref)i2.next();
-        			if (p.getPrefLevel().getPrefProlog().equals(PreferenceLevel.sRequired)) reqGroup = true;
-        			if (p.getRoomGroup().getRooms().contains(room)) groupPref.addPreferenceProlog(p.getPrefLevel().getPrefProlog());
-        		}
-        		if (reqGroup) {
-        			if (!PreferenceLevel.sRequired.equals(groupPref.getPreferenceProlog()))
-        				pref.addPreferenceProlog(PreferenceLevel.sProhibited);
-        		} else {
-            		pref.addPreferenceProlog(groupPref.getPreferenceProlog());
-        		}
-        			
-                
+                // --- group preference ----------
+                PreferenceCombination groupPref = PreferenceCombination.getDefault();
+                boolean reqGroup = false;
+                for (Iterator i2 = groupPrefs.iterator(); i2.hasNext();) {
+                    RoomGroupPref p = (RoomGroupPref) i2.next();
+                    if (p.getPrefLevel().getPrefProlog().equals(PreferenceLevel.sRequired))
+                        reqGroup = true;
+                    if (p.getRoomGroup().getRooms().contains(room))
+                        groupPref.addPreferenceProlog(p.getPrefLevel().getPrefProlog());
+                }
+                if (reqGroup) {
+                    if (!PreferenceLevel.sRequired.equals(groupPref.getPreferenceProlog()))
+                        pref.addPreferenceProlog(PreferenceLevel.sProhibited);
+                } else {
+                    pref.addPreferenceProlog(groupPref.getPreferenceProlog());
+                }
+
                 // --- room preference ------------
-        		String roomPref = null;
-        		PreferenceLevel roomPreference = getRoomPreference(clazz.getManagingDept(),room.getUniqueId());
-        		if (roomPreference!=null) {
-        			roomPref = roomPreference.getPrefProlog();
-    			}
-    			boolean reqRoom = false;
-    			for (Iterator i2=roomPrefs.iterator();i2.hasNext();) {
-        			RoomPref p = (RoomPref)i2.next();
-        			if (p.getPrefLevel().getPrefProlog().equals(PreferenceLevel.sRequired)) reqRoom = true;
-        			if (room.equals(p.getRoom())) roomPref = p.getPrefLevel().getPrefProlog();
-        		}
-    			if (reqRoom) {
-    				if (!PreferenceLevel.sRequired.equals(roomPref))
-    					pref.addPreferenceProlog(PreferenceLevel.sProhibited);
-    			} else if (roomPref != null) {
-    				pref.addPreferenceProlog(roomPref);
-    			}
-    			
+                String roomPref = null;
+                PreferenceLevel roomPreference = getRoomPreference(clazz.getManagingDept(), room.getUniqueId());
+                if (roomPreference != null) {
+                    roomPref = roomPreference.getPrefProlog();
+                }
+                boolean reqRoom = false;
+                for (Iterator i2 = roomPrefs.iterator(); i2.hasNext();) {
+                    RoomPref p = (RoomPref) i2.next();
+                    if (p.getPrefLevel().getPrefProlog().equals(PreferenceLevel.sRequired))
+                        reqRoom = true;
+                    if (room.equals(p.getRoom()))
+                        roomPref = p.getPrefLevel().getPrefProlog();
+                }
+                if (reqRoom) {
+                    if (!PreferenceLevel.sRequired.equals(roomPref))
+                        pref.addPreferenceProlog(PreferenceLevel.sProhibited);
+                } else if (roomPref != null) {
+                    pref.addPreferenceProlog(roomPref);
+                }
+
                 // --- building preference ------------
-        		Building bldg = (room instanceof Room ? ((Room)room).getBuilding() : null);
-        		boolean reqBldg = false;
-        		String bldgPref = null;
-        		for (Iterator i2=bldgPrefs.iterator();i2.hasNext();) {
-        			BuildingPref p = (BuildingPref)i2.next();
-        			if (p.getPrefLevel().getPrefProlog().equals(PreferenceLevel.sRequired)) reqBldg = true;
-        			if (bldg!=null && bldg.equals(p.getBuilding())) bldgPref = p.getPrefLevel().getPrefProlog();
-        		}
-        		if (reqBldg) {
-        			if (!PreferenceLevel.sRequired.equals(bldgPref))
-        				pref.addPreferenceProlog(PreferenceLevel.sProhibited);
-        		} else if (bldgPref != null) {
-        			pref.addPreferenceProlog(bldgPref);
-        		}
-                
-                // --- room features preference --------  
+                Building bldg = (room instanceof Room ? ((Room) room).getBuilding() : null);
+                boolean reqBldg = false;
+                String bldgPref = null;
+                for (Iterator i2 = bldgPrefs.iterator(); i2.hasNext();) {
+                    BuildingPref p = (BuildingPref) i2.next();
+                    if (p.getPrefLevel().getPrefProlog().equals(PreferenceLevel.sRequired))
+                        reqBldg = true;
+                    if (bldg != null && bldg.equals(p.getBuilding()))
+                        bldgPref = p.getPrefLevel().getPrefProlog();
+                }
+                if (reqBldg) {
+                    if (!PreferenceLevel.sRequired.equals(bldgPref))
+                        pref.addPreferenceProlog(PreferenceLevel.sProhibited);
+                } else if (bldgPref != null) {
+                    pref.addPreferenceProlog(bldgPref);
+                }
+
+                // --- room features preference --------
                 boolean acceptableFeatures = true;
                 PreferenceCombination featurePref = new MinMaxPreferenceCombination();
-                for (Iterator i2=featurePrefs.iterator();i2.hasNext();) {
-                	RoomFeaturePref roomFeaturePref = (RoomFeaturePref)i2.next();
-                	RoomFeature feature = roomFeaturePref.getRoomFeature();
-                	String p = roomFeaturePref.getPrefLevel().getPrefProlog();
-                	
-                	boolean hasFeature = feature.getRooms().contains(room);
+                for (Iterator i2 = featurePrefs.iterator(); i2.hasNext();) {
+                    RoomFeaturePref roomFeaturePref = (RoomFeaturePref) i2.next();
+                    RoomFeature feature = roomFeaturePref.getRoomFeature();
+                    String p = roomFeaturePref.getPrefLevel().getPrefProlog();
+
+                    boolean hasFeature = feature.getRooms().contains(room);
                     if (p.equals(PreferenceLevel.sProhibited) && hasFeature) {
-                        acceptableFeatures=false;
+                        acceptableFeatures = false;
                     }
                     if (p.equals(PreferenceLevel.sRequired) && !hasFeature) {
-                        acceptableFeatures=false;
+                        acceptableFeatures = false;
                     }
-                    if (p!=null && hasFeature && !p.equals(PreferenceLevel.sProhibited) && !p.equals(PreferenceLevel.sRequired)) 
-                    	featurePref.addPreferenceProlog(p);
+                    if (p != null && hasFeature && !p.equals(PreferenceLevel.sProhibited)
+                            && !p.equals(PreferenceLevel.sRequired))
+                        featurePref.addPreferenceProlog(p);
                 }
                 pref.addPreferenceInt(featurePref.getPreferenceInt());
                 if (!acceptableFeatures)
-                  	pref.addPreferenceProlog(PreferenceLevel.sProhibited);
-                
-                
-        		// --- room size -----------------
-                if (clazz.getNbrRooms()>1 && Boolean.TRUE.equals(clazz.isRoomsSplitAttendance())) {
-                	// split attendance -> skip room check
+                    pref.addPreferenceProlog(PreferenceLevel.sProhibited);
+
+                // --- room size -----------------
+                if (clazz.getNbrRooms() > 1 && Boolean.TRUE.equals(clazz.isRoomsSplitAttendance())) {
+                    // split attendance -> skip room check
                 } else {
-                    if (room.getCapacity().intValue()<stronglyDiscouragedCapacity) {
-                  		pref.addPreferenceInt(1000);
-                    }
-                    else if (room.getCapacity().intValue()<discouragedCapacity) {
+                    if (room.getCapacity().intValue() < stronglyDiscouragedCapacity) {
+                        pref.addPreferenceInt(1000);
+                    } else if (room.getCapacity().intValue() < discouragedCapacity) {
                         pref.addPreferenceProlog(PreferenceLevel.sStronglyDiscouraged);
-                    }
-                    else if (room.getCapacity().intValue()<roomCapacity) {
-                    	pref.addPreferenceProlog(PreferenceLevel.sDiscouraged);
+                    } else if (room.getCapacity().intValue() < roomCapacity) {
+                        pref.addPreferenceProlog(PreferenceLevel.sDiscouraged);
                     }
                 }
-                
+
                 int prefInt = pref.getPreferenceInt();
-                
-                if (!add) continue;
-                
+
+                if (!add)
+                    continue;
+
                 filteredRooms.put(room, prefInt);
                 permIds.add(room.getPermanentId());
             }
- 			
- 			boolean changePast = ApplicationProperty.ClassAssignmentChangePastMeetings.isTrue();
- 			boolean ignorePast = ApplicationProperty.ClassAssignmentIgnorePastMeetings.isTrue();
- 			boolean includeSuffix = ApplicationProperty.SolverShowClassSufix.isTrue();
- 			boolean includeConfig = ApplicationProperty.SolverShowConfiguratioName.isTrue();
 
- 			List<Date> datesToCheck = null;
- 			if (ignorePast || !changePast) {
- 				datesToCheck = new ArrayList<Date>();
- 	 			for(Date aDate : period.getDates()){
- 	 				if (aDate.compareTo(today) > 0)
- 	 					datesToCheck.add(aDate);
- 	 			}
- 			} else {
- 				datesToCheck = period.getDates();
- 			}
-            Hashtable<Long,Set<Long>> room2classIds = Location.findClassLocationTable(clazz.getSessionId(), permIds, period.getStartSlot(), period.getLength(),
-            		changePast ? period.getDates() : datesToCheck);
-            
-            Hashtable<Long,Set<Event>> room2events = null;
-            if (RoomAvailability.getInstance()!=null && RoomAvailability.getInstance() instanceof DefaultRoomAvailabilityService) {
-            	room2events = Location.findEventTable(clazz.getSessionId(), permIds, period.getStartSlot(), period.getLength(), datesToCheck);
+            boolean changePast = ApplicationProperty.ClassAssignmentChangePastMeetings.isTrue();
+            boolean ignorePast = ApplicationProperty.ClassAssignmentIgnorePastMeetings.isTrue();
+            boolean includeSuffix = ApplicationProperty.SolverShowClassSufix.isTrue();
+            boolean includeConfig = ApplicationProperty.SolverShowConfiguratioName.isTrue();
+
+            List<Date> datesToCheck = null;
+            if (ignorePast || !changePast) {
+                datesToCheck = new ArrayList<Date>();
+                for (Date aDate : period.getDates()) {
+                    if (aDate.compareTo(today) > 0)
+                        datesToCheck.add(aDate);
+                }
+            } else {
+                datesToCheck = period.getDates();
+            }
+            Hashtable<Long, Set<Long>> room2classIds = Location.findClassLocationTable(clazz.getSessionId(), permIds,
+                    period.getStartSlot(), period.getLength(),
+                    changePast ? period.getDates() : datesToCheck);
+
+            Hashtable<Long, Set<Event>> room2events = null;
+            if (RoomAvailability.getInstance() != null
+                    && RoomAvailability.getInstance() instanceof DefaultRoomAvailabilityService) {
+                room2events = Location.findEventTable(clazz.getSessionId(), permIds, period.getStartSlot(),
+                        period.getLength(), datesToCheck);
             }
 
- 			rooms: for (Map.Entry<Location, Integer> entry: filteredRooms.entrySet()) {
- 				Location room = entry.getKey();
- 				int prefInt = entry.getValue();
- 				String note = null;
- 				
- 				if (room.isIgnoreRoomCheck()) {
- 					rooms.addElement(new ClassRoomInfo(room, prefInt, note));
- 					continue;
- 				}
- 				
- 				Set<Long> classIds = room2classIds.get(room.getPermanentId());
- 				if (classIds==null) classIds = new HashSet();
- 				
+            rooms: for (Map.Entry<Location, Integer> entry : filteredRooms.entrySet()) {
+                Location room = entry.getKey();
+                int prefInt = entry.getValue();
+                String note = null;
+
+                if (room.isIgnoreRoomCheck()) {
+                    rooms.addElement(new ClassRoomInfo(room, prefInt, note));
+                    continue;
+                }
+
+                Set<Long> classIds = room2classIds.get(room.getPermanentId());
+                if (classIds == null)
+                    classIds = new HashSet();
+
                 // Fix the location table with the current assignment
-                if (getClassAssignment()!=null && getClassAssignment().hasRoom(room.getUniqueId()) && getClassAssignment().getTime().overlaps(period))
-                	classIds.remove(getClassAssignment().getClassId());
-                if (iChange!=null) {
+                if (getClassAssignment() != null && getClassAssignment().hasRoom(room.getUniqueId())
+                        && getClassAssignment().getTime().overlaps(period))
+                    classIds.remove(getClassAssignment().getClassId());
+                if (iChange != null) {
                     for (ClassAssignment conflict : iChange.getConflicts()) {
-                    	if (conflict.hasRoom(room.getUniqueId()) && conflict.getTime().overlaps(period))
-                    		classIds.remove(conflict.getClassId());
+                        if (conflict.hasRoom(room.getUniqueId()) && conflict.getTime().overlaps(period))
+                            classIds.remove(conflict.getClassId());
                     }
                     for (ClassAssignment current : iChange.getAssignments()) {
-                    	ClassAssignment initial = iChange.getInitial(current);
-                        if (initial!=null && initial.hasRoom(room.getUniqueId()) && initial.getTime().overlaps(period))
-                        	classIds.remove(initial.getClassId());
+                        ClassAssignment initial = iChange.getInitial(current);
+                        if (initial != null && initial.hasRoom(room.getUniqueId())
+                                && initial.getTime().overlaps(period))
+                            classIds.remove(initial.getClassId());
                     }
                     for (ClassAssignment current : iChange.getAssignments()) {
-                        if (!getClazz().getClassId().equals(current.getClassId()) && current.hasRoom(room.getUniqueId()) && current.getTime().overlaps(period))
-                        	classIds.add(current.getClassId());
+                        if (!getClazz().getClassId().equals(current.getClassId()) && current.hasRoom(room.getUniqueId())
+                                && current.getTime().overlaps(period))
+                            classIds.add(current.getClassId());
                     }
                 }
 
-                if (!allowConflicts && classIds!=null && !classIds.isEmpty()) {
-                	for (Long classId: classIds) {
-                		if (!clazz.canShareRoom(classId)) {
-                			if (room.getLabel().equals(filter)) iForm.setMessage(MSG.messageRoomNotAvailable(room.getLabel(), period.getLongName(), Class_DAO.getInstance().get(classId).getClassLabel(includeSuffix, includeConfig)));
-                			continue rooms;
-                		}
-                	}
+                if (!allowConflicts && classIds != null && !classIds.isEmpty()) {
+                    for (Long classId : classIds) {
+                        if (!clazz.canShareRoom(classId)) {
+                            if (room.getLabel().equals(filter))
+                                iForm.setMessage(MSG.messageRoomNotAvailable(room.getLabel(), period.getLongName(),
+                                        Class_DAO.getInstance().get(classId).getClassLabel(includeSuffix,
+                                                includeConfig)));
+                            continue rooms;
+                        }
+                    }
                 }
-                if (allowConflicts && classIds!=null && !classIds.isEmpty()) {
-                	for (Long classId: classIds) {
-                		if (!clazz.canShareRoom(classId)) {
-                			prefInt += 10000;
-                			note = "Conflicts with " + Class_DAO.getInstance().get(classId).getClassLabel(includeSuffix, includeConfig);
-                			break;
-                		}
-                	}
+                if (allowConflicts && classIds != null && !classIds.isEmpty()) {
+                    for (Long classId : classIds) {
+                        if (!clazz.canShareRoom(classId)) {
+                            prefInt += 10000;
+                            note = "Conflicts with "
+                                    + Class_DAO.getInstance().get(classId).getClassLabel(includeSuffix, includeConfig);
+                            break;
+                        }
+                    }
                 }
-                if (classIds!=null && iChange!=null) {
-                	for (Long classId: classIds) {
-                		if (iChange.getCurrent(classId)!=null && !clazz.canShareRoom(classId)) {
-                        	if (room.getLabel().equals(filter)) iForm.setMessage(MSG.messageRoomNotAvailable(room.getLabel(), period.getLongName(), Class_DAO.getInstance().get(classId).getClassLabel(includeSuffix, includeConfig)));
-                        	continue rooms;
-                		}
-                	}
+                if (classIds != null && iChange != null) {
+                    for (Long classId : classIds) {
+                        if (iChange.getCurrent(classId) != null && !clazz.canShareRoom(classId)) {
+                            if (room.getLabel().equals(filter))
+                                iForm.setMessage(MSG.messageRoomNotAvailable(room.getLabel(), period.getLongName(),
+                                        Class_DAO.getInstance().get(classId).getClassLabel(includeSuffix,
+                                                includeConfig)));
+                            continue rooms;
+                        }
+                    }
                 }
 
-                if (room2events!=null) {
-                	Set<Event> conflicts = room2events.get(room.getPermanentId());
-                	if (conflicts!=null && !conflicts.isEmpty()) {
-            			if (room.getLabel().equals(filter)) iForm.setMessage(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(), conflicts.toString()));
-        				sLog.info(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(), conflicts.toString()));
-        				continue rooms;
-                	}
-                } else if (RoomAvailability.getInstance()!=null) {
-            		Collection<TimeBlock> times = RoomAvailability.getInstance().getRoomAvailability(
+                if (room2events != null) {
+                    Set<Event> conflicts = room2events.get(room.getPermanentId());
+                    if (conflicts != null && !conflicts.isEmpty()) {
+                        if (room.getLabel().equals(filter))
+                            iForm.setMessage(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(),
+                                    conflicts.toString()));
+                        sLog.info(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(),
+                                conflicts.toString()));
+                        continue rooms;
+                    }
+                } else if (RoomAvailability.getInstance() != null) {
+                    Collection<TimeBlock> times = RoomAvailability.getInstance().getRoomAvailability(
                             room.getUniqueId(),
-                            bounds[0], bounds[1], 
+                            bounds[0], bounds[1],
                             RoomAvailabilityInterface.sClassType);
-            		if (times != null && !times.isEmpty()) {
-                		Collection<TimeBlock> timesToCheck = null;
-                		if (!changePast || ignorePast) {
-                			timesToCheck = new Vector();
-                			for (TimeBlock time: times) {
-                				if (!time.getEndTime().before(today))
-                					timesToCheck.add(time);
-                			}
-                		} else {
-                			timesToCheck = times;
-                		}
-                		TimeBlock time = period.overlaps(timesToCheck);
-                		if (time!=null) {
-                			if (room.getLabel().equals(filter)) iForm.setMessage(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(), time.toString()));
-            				sLog.info(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(), time.toString()));
-            				continue rooms;
-                		}
-            		}
+                    if (times != null && !times.isEmpty()) {
+                        Collection<TimeBlock> timesToCheck = null;
+                        if (!changePast || ignorePast) {
+                            timesToCheck = new Vector();
+                            for (TimeBlock time : times) {
+                                if (!time.getEndTime().before(today))
+                                    timesToCheck.add(time);
+                            }
+                        } else {
+                            timesToCheck = times;
+                        }
+                        TimeBlock time = period.overlaps(timesToCheck);
+                        if (time != null) {
+                            if (room.getLabel().equals(filter))
+                                iForm.setMessage(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(),
+                                        time.toString()));
+                            sLog.info(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(),
+                                    time.toString()));
+                            continue rooms;
+                        }
+                    }
                 }
-                
+
                 if (room instanceof Room) {
-                	Room r = (Room)room;
-                	if (r.getParentRoom() != null && !r.getParentRoom().isIgnoreRoomCheck()) {
-                		if (room2events!=null) {
-                        	Set<Event> conflicts = room2events.get(r.getParentRoom().getPermanentId());
-                        	if (conflicts!=null && !conflicts.isEmpty()) {
-                    			if (room.getLabel().equals(filter)) iForm.setMessage(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(), conflicts.toString()));
-                				sLog.info(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(), conflicts.toString()));
-                				continue rooms;
-                        	}
-                        } else if (RoomAvailability.getInstance()!=null) {
-                    		Collection<TimeBlock> times = RoomAvailability.getInstance().getRoomAvailability(
-                    				r.getParentRoom().getUniqueId(),
-                                    bounds[0], bounds[1], 
+                    Room r = (Room) room;
+                    if (r.getParentRoom() != null && !r.getParentRoom().isIgnoreRoomCheck()) {
+                        if (room2events != null) {
+                            Set<Event> conflicts = room2events.get(r.getParentRoom().getPermanentId());
+                            if (conflicts != null && !conflicts.isEmpty()) {
+                                if (room.getLabel().equals(filter))
+                                    iForm.setMessage(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(),
+                                            conflicts.toString()));
+                                sLog.info(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(),
+                                        conflicts.toString()));
+                                continue rooms;
+                            }
+                        } else if (RoomAvailability.getInstance() != null) {
+                            Collection<TimeBlock> times = RoomAvailability.getInstance().getRoomAvailability(
+                                    r.getParentRoom().getUniqueId(),
+                                    bounds[0], bounds[1],
                                     RoomAvailabilityInterface.sClassType);
-                    		if (times != null && !times.isEmpty()) {
-                        		Collection<TimeBlock> timesToCheck = null;
-                        		if (!changePast || ignorePast) {
-                        			timesToCheck = new Vector();
-                        			for (TimeBlock time: times) {
-                        				if (!time.getEndTime().before(today))
-                        					timesToCheck.add(time);
-                        			}
-                        		} else {
-                        			timesToCheck = times;
-                        		}
-                        		TimeBlock time = period.overlaps(timesToCheck);
-                        		if (time!=null) {
-                        			if (room.getLabel().equals(filter)) iForm.setMessage(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(), time.toString()));
-                    				sLog.info(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(), time.toString()));
-                    				continue rooms;
-                        		}
-                    		}
+                            if (times != null && !times.isEmpty()) {
+                                Collection<TimeBlock> timesToCheck = null;
+                                if (!changePast || ignorePast) {
+                                    timesToCheck = new Vector();
+                                    for (TimeBlock time : times) {
+                                        if (!time.getEndTime().before(today))
+                                            timesToCheck.add(time);
+                                    }
+                                } else {
+                                    timesToCheck = times;
+                                }
+                                TimeBlock time = period.overlaps(timesToCheck);
+                                if (time != null) {
+                                    if (room.getLabel().equals(filter))
+                                        iForm.setMessage(MSG.messageRoomNotAvailable2(room.getLabel(),
+                                                period.getLongName(), time.toString()));
+                                    sLog.info(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(),
+                                            time.toString()));
+                                    continue rooms;
+                                }
+                            }
                         }
-                	}
-                	for (Room p: r.getPartitions()) {
-                		if (p.isIgnoreRoomCheck()) continue;
-                		if (room2events!=null) {
-                        	Set<Event> conflicts = room2events.get(p.getPermanentId());
-                        	if (conflicts!=null && !conflicts.isEmpty()) {
-                    			if (room.getLabel().equals(filter)) iForm.setMessage(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(), conflicts.toString()));
-                				sLog.info(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(), conflicts.toString()));
-                				continue rooms;
-                        	}
-                        } else if (RoomAvailability.getInstance()!=null) {
-                    		Collection<TimeBlock> times = RoomAvailability.getInstance().getRoomAvailability(
-                    				p.getUniqueId(),
-                                    bounds[0], bounds[1], 
+                    }
+                    for (Room p : r.getPartitions()) {
+                        if (p.isIgnoreRoomCheck())
+                            continue;
+                        if (room2events != null) {
+                            Set<Event> conflicts = room2events.get(p.getPermanentId());
+                            if (conflicts != null && !conflicts.isEmpty()) {
+                                if (room.getLabel().equals(filter))
+                                    iForm.setMessage(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(),
+                                            conflicts.toString()));
+                                sLog.info(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(),
+                                        conflicts.toString()));
+                                continue rooms;
+                            }
+                        } else if (RoomAvailability.getInstance() != null) {
+                            Collection<TimeBlock> times = RoomAvailability.getInstance().getRoomAvailability(
+                                    p.getUniqueId(),
+                                    bounds[0], bounds[1],
                                     RoomAvailabilityInterface.sClassType);
-                    		if (times != null && !times.isEmpty()) {
-                        		Collection<TimeBlock> timesToCheck = null;
-                        		if (!changePast || ignorePast) {
-                        			timesToCheck = new Vector();
-                        			for (TimeBlock time: times) {
-                        				if (!time.getEndTime().before(today))
-                        					timesToCheck.add(time);
-                        			}
-                        		} else {
-                        			timesToCheck = times;
-                        		}
-                        		TimeBlock time = period.overlaps(timesToCheck);
-                        		if (time!=null) {
-                        			if (room.getLabel().equals(filter)) iForm.setMessage(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(), time.toString()));
-                    				sLog.info(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(), time.toString()));
-                    				continue rooms;
-                        		}
-                    		}
+                            if (times != null && !times.isEmpty()) {
+                                Collection<TimeBlock> timesToCheck = null;
+                                if (!changePast || ignorePast) {
+                                    timesToCheck = new Vector();
+                                    for (TimeBlock time : times) {
+                                        if (!time.getEndTime().before(today))
+                                            timesToCheck.add(time);
+                                    }
+                                } else {
+                                    timesToCheck = times;
+                                }
+                                TimeBlock time = period.overlaps(timesToCheck);
+                                if (time != null) {
+                                    if (room.getLabel().equals(filter))
+                                        iForm.setMessage(MSG.messageRoomNotAvailable2(room.getLabel(),
+                                                period.getLongName(), time.toString()));
+                                    sLog.info(MSG.messageRoomNotAvailable2(room.getLabel(), period.getLongName(),
+                                            time.toString()));
+                                    continue rooms;
+                                }
+                            }
                         }
-                	}
+                    }
                 }
 
                 rooms.addElement(new ClassRoomInfo(room, prefInt, note));
- 			}
+            }
         }
-        
+
         return rooms;
     }
-    
+
     public String getRoomTable() {
         try {
             Vector<ClassRoomInfo> rooms = getRooms();
-            ClassAssignment ClassAssignment = (iChange==null?null:iChange.getCurrent(iClass));
-            Collection<ClassRoomInfo> assigned = (ClassAssignment!=null?ClassAssignment.getRooms():isClassAssigned()?getClassAssignment().getRooms():null);
-            Collection<ClassRoomInfo> original = (getClassOldAssignment()!=null?getClassOldAssignment().getRooms():null);
-            if (rooms==null || rooms.isEmpty()) return "";
+            ClassAssignment ClassAssignment = (iChange == null ? null : iChange.getCurrent(iClass));
+            Collection<ClassRoomInfo> assigned = (ClassAssignment != null ? ClassAssignment.getRooms()
+                    : isClassAssigned() ? getClassAssignment().getRooms() : null);
+            Collection<ClassRoomInfo> original = (getClassOldAssignment() != null ? getClassOldAssignment().getRooms()
+                    : null);
+            if (rooms == null || rooms.isEmpty())
+                return "";
             if (MSG.sortRoomNameAsc().equals(iForm.getRoomOrder()))
-            	Collections.sort(rooms, new Comparator<ClassRoomInfo>() {
+                Collections.sort(rooms, new Comparator<ClassRoomInfo>() {
                     public int compare(ClassRoomInfo r1, ClassRoomInfo r2) {
                         int cmp = r1.getName().compareTo(r2.getName());
-                        if (cmp!=0) return cmp;
+                        if (cmp != 0)
+                            return cmp;
                         return r1.getLocationId().compareTo(r2.getLocationId());
                     }
                 });
             else if (MSG.sortRoomNameDesc().equals(iForm.getRoomOrder()))
-            	Collections.sort(rooms, new Comparator<ClassRoomInfo>() {
+                Collections.sort(rooms, new Comparator<ClassRoomInfo>() {
                     public int compare(ClassRoomInfo r1, ClassRoomInfo r2) {
                         int cmp = r2.getName().compareTo(r1.getName());
-                        if (cmp!=0) return cmp;
+                        if (cmp != 0)
+                            return cmp;
                         return r1.getLocationId().compareTo(r2.getLocationId());
                     }
                 });
             else if (MSG.sortRoomSizeAsc().equals(iForm.getRoomOrder()))
-            	Collections.sort(rooms, new Comparator<ClassRoomInfo>() {
+                Collections.sort(rooms, new Comparator<ClassRoomInfo>() {
                     public int compare(ClassRoomInfo r1, ClassRoomInfo r2) {
-                        int cmp = Double.compare(r1.getCapacity(),r2.getCapacity());
-                        if (cmp!=0) return cmp;
-                        cmp = r1.getName().compareTo(r2.getName());;
-                        if (cmp!=0) return cmp;
+                        int cmp = Double.compare(r1.getCapacity(), r2.getCapacity());
+                        if (cmp != 0)
+                            return cmp;
+                        cmp = r1.getName().compareTo(r2.getName());
+                        ;
+                        if (cmp != 0)
+                            return cmp;
                         return r1.getLocationId().compareTo(r2.getLocationId());
                     }
                 });
             else if (MSG.sortRoomSizeDesc().equals(iForm.getRoomOrder()))
-            	Collections.sort(rooms, new Comparator<ClassRoomInfo>() {
+                Collections.sort(rooms, new Comparator<ClassRoomInfo>() {
                     public int compare(ClassRoomInfo r1, ClassRoomInfo r2) {
-                        int cmp = Double.compare(r2.getCapacity(),r1.getCapacity());
-                        if (cmp!=0) return cmp;
-                        cmp = r1.getName().compareTo(r2.getName());;
-                        if (cmp!=0) return cmp;
+                        int cmp = Double.compare(r2.getCapacity(), r1.getCapacity());
+                        if (cmp != 0)
+                            return cmp;
+                        cmp = r1.getName().compareTo(r2.getName());
+                        ;
+                        if (cmp != 0)
+                            return cmp;
                         return r1.getLocationId().compareTo(r2.getLocationId());
                     }
                 });
@@ -1563,13 +1782,13 @@ public class ClassInfoModel implements Serializable {
             ret += "}";
             ret += "var sCap = -1;";
             ret += "var sRooms = '";
-            if (assigned!=null && assigned.size()>0) {
+            if (assigned != null && assigned.size() > 0) {
                 for (ClassRoomInfo room : assigned) {
-                    ret+=":"+room.getLocationId()+"@"+room.getCapacity();
+                    ret += ":" + room.getLocationId() + "@" + room.getCapacity();
                 }
             }
             ret += "';";
-            ret += "var sNrRooms = "+(assigned!=null?assigned.size():0)+";";
+            ret += "var sNrRooms = " + (assigned != null ? assigned.size() : 0) + ";";
             ret += "function roomSelected(id) {";
             ret += "    return sRooms.indexOf(':'+id+'@')>=0;";
             ret += "}";
@@ -1582,8 +1801,9 @@ public class ClassInfoModel implements Serializable {
             ret += "function roomClick(source, id, cap) { ";
             ret += "    if (sCap<0) {";
             ret += "        sCap = 0; sRooms=''; sNrRooms=0;";
-            if (assigned!=null && assigned.size()>0) {
-                for (ClassRoomInfo room : assigned) ret+="        roomOut("+room.getLocationId()+");";
+            if (assigned != null && assigned.size() > 0) {
+                for (ClassRoomInfo room : assigned)
+                    ret += "        roomOut(" + room.getLocationId() + ");";
             }
             ret += "    }";
             ret += "    var i = sRooms.indexOf(':'+id+'@');";
@@ -1594,7 +1814,7 @@ public class ClassInfoModel implements Serializable {
             ret += "    } else {";
             ret += "        sRooms = sRooms + ':' + id + '@' + cap;";
             ret += "        sCap += cap; sNrRooms++;";
-            ret += "        if (sNrRooms>"+getClazz().getNumberOfRooms()+") {";
+            ret += "        if (sNrRooms>" + getClazz().getNumberOfRooms() + ") {";
             ret += "            var fid = sRooms.substring(1, sRooms.indexOf('@'));";
             ret += "            var fcap = sRooms.substring(sRooms.indexOf('@')+1, sRooms.indexOf(':',1));";
             ret += "            sRooms = sRooms.substring(sRooms.indexOf(':',1));";
@@ -1602,39 +1822,42 @@ public class ClassInfoModel implements Serializable {
             ret += "        };";
             ret += "    }";
             ret += "    roomOut(id);";
-            ret += "    if (sNrRooms=="+getClazz().getNumberOfRooms()+") {displayLoading(); document.location='classInfo.action?op=Select&room='+sRooms+'&noCacheTS=" + new Date().getTime()+"';}";
+            ret += "    if (sNrRooms==" + getClazz().getNumberOfRooms()
+                    + ") {displayLoading(); document.location='classInfo.action?op=Select&room='+sRooms+'&noCacheTS="
+                    + new Date().getTime() + "';}";
             ret += "    var c = document.getElementById('roomCapacityCounter');";
-            ret += "    if (c!=null) c.innerHTML = (sCap<"+getClazz().getClassLimit()+"?'<font color=\"#ec0000\">'+sCap+'</font>':''+sCap);";
+            ret += "    if (c!=null) c.innerHTML = (sCap<" + getClazz().getClassLimit()
+                    + "?'<font color=\"#ec0000\">'+sCap+'</font>':''+sCap);";
             ret += "}";
             ret += "</script>";
             ret += "<table border='0' cellspacing='0' cellpadding='3'>";
             int idx = 0;
             int step = 6;
             for (ClassRoomInfo room : rooms) {
-                if ((idx%step)==0) {
-                    if (idx>0) ret +="</tr>";
+                if ((idx % step) == 0) {
+                    if (idx > 0)
+                        ret += "</tr>";
                     ret += "<tr>";
                 }
                 String style = "";
-                if (assigned!=null && assigned.contains(room))
+                if (assigned != null && assigned.contains(room))
                     style += "background-color:rgb(168,187,225);";
-                if (original!=null && original.contains(room))
+                if (original != null && original.contains(room))
                     style += "text-decoration:underline;";
-                String mouse = 
-                    "onMouseOver=\"roomOver(this,"+room.getLocationId()+");\" "+
-                    "onMouseOut=\"roomOut("+room.getLocationId()+");\" "+
-                    "onClick=\"roomClick(this,"+room.getLocationId()+","+room.getCapacity()+");\"";
-                ret += "<td nowrap id='r"+room.getLocationId()+"' " +
-                        (style.length()>0?"style='"+style+"' ":"")+mouse+">"+
-                        room.toString()+"</td>";
-                if ((idx%step)<step-1)
+                String mouse = "onMouseOver=\"roomOver(this," + room.getLocationId() + ");\" " +
+                        "onMouseOut=\"roomOut(" + room.getLocationId() + ");\" " +
+                        "onClick=\"roomClick(this," + room.getLocationId() + "," + room.getCapacity() + ");\"";
+                ret += "<td nowrap id='r" + room.getLocationId() + "' " +
+                        (style.length() > 0 ? "style='" + style + "' " : "") + mouse + ">" +
+                        room.toString() + "</td>";
+                if ((idx % step) < step - 1)
                     style += "border-right: #646464 1px dashed;";
-                ret += "<td id='c"+room.getLocationId()+"' "+
-                        (style.length()>0?"style='"+style+"' ":"")+mouse+">"+
-                        room.getCapacity()+"</td>";
-                idx ++;
+                ret += "<td id='c" + room.getLocationId() + "' " +
+                        (style.length() > 0 ? "style='" + style + "' " : "") + mouse + ">" +
+                        room.getCapacity() + "</td>";
+                idx++;
             }
-            while ((idx%step)!=0) {
+            while ((idx % step) != 0) {
                 ret += "<td colspan='2'>&nbsp;</td>";
                 idx++;
             }
@@ -1642,92 +1865,403 @@ public class ClassInfoModel implements Serializable {
             ret += "</table>";
             return ret;
         } catch (Exception e) {
-        	iForm.setMessage(e.getMessage());
-            sLog.error(e.getMessage(),e);
+            iForm.setMessage(e.getMessage());
+            sLog.error(e.getMessage(), e);
             return "";
         }
     }
-    
+
     public Vector<ClassRoomInfo> getRooms() {
-    	ClassTimeInfo time = null;
-    	try {
-    		time = (getSelectedAssignment()!=null?getSelectedAssignment().getTime():getClassAssignment().getTime());
-    	} catch (Exception e) {}
-    	if (time == null) return null;
+        ClassTimeInfo time = null;
+        try {
+            time = (getSelectedAssignment() != null ? getSelectedAssignment().getTime()
+                    : getClassAssignment().getTime());
+        } catch (Exception e) {
+        }
+        if (time == null)
+            return null;
         // if (getClazz().getClassLimit()==0) return null;
         int minRoomSize = -1;
         try {
-            minRoomSize = (iForm.getMinRoomSize()==null || iForm.getMinRoomSize().length()==0 ? -1 : Integer.parseInt(iForm.getMinRoomSize().trim()));
-        } catch (Exception e) {}
+            minRoomSize = (iForm.getMinRoomSize() == null || iForm.getMinRoomSize().length() == 0 ? -1
+                    : Integer.parseInt(iForm.getMinRoomSize().trim()));
+        } catch (Exception e) {
+        }
         int maxRoomSize = -1;
         try {
-            maxRoomSize = (iForm.getMaxRoomSize()==null || iForm.getMaxRoomSize().length()==0 ? -1 : Integer.parseInt(iForm.getMaxRoomSize().trim()));
-        } catch (Exception e) {}
+            maxRoomSize = (iForm.getMaxRoomSize() == null || iForm.getMaxRoomSize().length() == 0 ? -1
+                    : Integer.parseInt(iForm.getMaxRoomSize().trim()));
+        } catch (Exception e) {
+        }
         try {
-            if (getSelectedAssignment()==null && !isClassAssigned()) return null;
-            if (iRooms==null) {
-                iRooms = findRooms(time, minRoomSize, maxRoomSize, iForm.getRoomFilter(), iForm.getAllowRoomConflict(), iForm.getRoomBaseEnum());
+            if (getSelectedAssignment() == null && !isClassAssigned())
+                return null;
+            if (iRooms == null) {
+                iRooms = findRooms(time, minRoomSize, maxRoomSize, iForm.getRoomFilter(), iForm.getAllowRoomConflict(),
+                        iForm.getRoomBaseEnum());
             }
             return iRooms;
         } catch (Exception e) {
-            sLog.error(e.getMessage(),e);
+            sLog.error(e.getMessage(), e);
             return null;
         }
     }
-    
+
     public int getRoomSize() {
-        ClassAssignment classAssignment = (iChange==null?null:iChange.getCurrent(iClass));
-        if (classAssignment!=null) return classAssignment.getRoomSize();
-        if (isClassAssigned()) return getClassAssignment().getRoomSize();
+        ClassAssignment classAssignment = (iChange == null ? null : iChange.getCurrent(iClass));
+        if (classAssignment != null)
+            return classAssignment.getRoomSize();
+        if (isClassAssigned())
+            return getClassAssignment().getRoomSize();
         return 0;
     }
-    
+
     public ClassProposedChange getChange() {
-        if (iChange==null || iChange.isEmpty()) return null;
-        return iChange; 
+        if (iChange == null || iChange.isEmpty())
+            return null;
+        return iChange;
     }
-    
+
     public boolean isHasChange() {
         return iChange != null && !iChange.isEmpty();
     }
-    
+
     public String getChangeHtmlTable() {
-    	if (iChange==null || iChange.isEmpty()) return null;
+        if (iChange == null || iChange.isEmpty())
+            return null;
         return iChange.getHtmlTable(getSessionContext());
     }
-    
+
     public static boolean match(String name, String filter) {
-        if (filter==null || filter.trim().length()==0) return true;
+        if (filter == null || filter.trim().length() == 0)
+            return true;
         String n = name.toUpperCase();
-        StringTokenizer stk1 = new StringTokenizer(filter.toUpperCase(),";");
+        StringTokenizer stk1 = new StringTokenizer(filter.toUpperCase(), ";");
         while (stk1.hasMoreTokens()) {
-            StringTokenizer stk2 = new StringTokenizer(stk1.nextToken()," ,");
+            StringTokenizer stk2 = new StringTokenizer(stk1.nextToken(), " ,");
             boolean match = true;
             while (match && stk2.hasMoreTokens()) {
                 String token = stk2.nextToken().trim();
-                if (token.length()==0) continue;
-                if (token.indexOf('*')>=0 || token.indexOf('?')>=0) {
+                if (token.length() == 0)
+                    continue;
+                if (token.indexOf('*') >= 0 || token.indexOf('?') >= 0) {
                     try {
-                        String tokenRegExp = "\\s+"+token.replaceAll("\\.", "\\.").replaceAll("\\?", ".+").replaceAll("\\*", ".*")+"\\s";
-                        if (!Pattern.compile(tokenRegExp).matcher(" "+n+" ").find()) match = false;
-                    } catch (PatternSyntaxException e) { match = false; }
-                } else if (n.indexOf(token)<0) match = false;
+                        String tokenRegExp = "\\s+"
+                                + token.replaceAll("\\.", "\\.").replaceAll("\\?", ".+").replaceAll("\\*", ".*")
+                                + "\\s";
+                        if (!Pattern.compile(tokenRegExp).matcher(" " + n + " ").find())
+                            match = false;
+                    } catch (PatternSyntaxException e) {
+                        match = false;
+                    }
+                } else if (n.indexOf(token) < 0)
+                    match = false;
             }
-            if (match) return true;
+            if (match)
+                return true;
         }
-        return false;        
+        return false;
     }
-    
+
+    /**
+     * Checks whether the proposed assignment violates any HARD (Required or
+     * Prohibited)
+     * distribution constraints involving the given class. Any peer class whose
+     * committed
+     * assignment would conflict with the proposed placement is added to
+     * {@code iChange.getConflicts()}, signalling that it must be unassigned first.
+     *
+     * <p>
+     * Only REQUIRED and PROHIBITED preference levels constitute hard constraints;
+     * softer levels (e.g. Strongly Preferred, Discouraged) are intentionally
+     * skipped
+     * because they are handled as soft penalties by the solver.
+     * </p>
+     *
+     * @param assignment the proposed {@link ClassAssignment} (time and rooms
+     *                   already set)
+     * @param clazz      the persistent {@link Class_} entity being assigned
+     */
+    private void checkHardDistributionConflicts(ClassAssignment assignment, Class_ clazz) {
+        // Only run when we are allowed to unassign conflicting classes.
+        if (!iUnassignConflictingAssignments)
+            return;
+        // Skip incomplete proposals that have no time yet.
+        if (!assignment.hasTime())
+            return;
+
+        // --- 1. Load HARD distribution prefs that mention this class or its subpart
+        // --------
+        org.hibernate.Session hibSession = Class_DAO.getInstance().getSession();
+        List<DistributionPref> hardPrefs;
+        try {
+            hardPrefs = hibSession.createQuery(
+                    "select distinct dp from DistributionPref dp " +
+                            "inner join dp.distributionObjects as dobj " +
+                            "where (dobj.prefGroup.uniqueId = :classId " +
+                            "   or dobj.prefGroup.uniqueId = :subpartId) " +
+                            "  and (dp.prefLevel.prefProlog = :required " +
+                            "    or dp.prefLevel.prefProlog = :prohibited)",
+                    DistributionPref.class)
+                    .setParameter("classId", clazz.getUniqueId())
+                    .setParameter("subpartId", clazz.getSchedulingSubpart().getUniqueId())
+                    .setParameter("required", PreferenceLevel.sRequired)
+                    .setParameter("prohibited", PreferenceLevel.sProhibited)
+                    .list();
+        } catch (Exception e) {
+            sLog.warn("Failed to load hard distribution preferences for class "
+                    + clazz.getClassLabel() + ": " + e.getMessage(), e);
+            return;
+        }
+
+        if (hardPrefs == null || hardPrefs.isEmpty())
+            return;
+
+        ClassTimeInfo proposedTime = assignment.getTime();
+        Collection<ClassRoomInfo> proposedRooms = assignment.getRooms();
+        String constraintType = null;
+        boolean isRequired;
+
+        // --- 2. Evaluate each hard distribution preference
+        // -----------------------------------
+        for (DistributionPref dp : hardPrefs) {
+            isRequired = PreferenceLevel.sRequired.equals(dp.getPrefLevel().getPrefProlog());
+            constraintType = dp.getDistributionType().getReference();
+
+            for (DistributionObject dobj : dp.getDistributionObjects()) {
+                // Resolve the peer group: may be a Class_ or a SchedulingSubpart
+                List<Class_> peers = new ArrayList<>();
+                try {
+                    PreferenceGroup pg = dobj.getPrefGroup();
+                    if (pg instanceof Class_) {
+                        peers.add((Class_) pg);
+                    } else if (pg instanceof SchedulingSubpart) {
+                        peers.addAll(((SchedulingSubpart) pg).getClasses());
+                    } else {
+                        // pg may be a Hibernate proxy; resolve via DAO
+                        PreferenceGroup loaded = PreferenceGroupDAO.getInstance().get(pg.getUniqueId(), hibSession);
+                        if (loaded instanceof Class_)
+                            peers.add((Class_) loaded);
+                        else if (loaded instanceof SchedulingSubpart)
+                            peers.addAll(((SchedulingSubpart) loaded).getClasses());
+                    }
+                } catch (Exception e) {
+                    sLog.warn("Unable to resolve distribution object in preference "
+                            + dp.getUniqueId() + ": " + e.getMessage(), e);
+                    continue;
+                }
+
+                for (Class_ peer : peers) {
+                    // Skip the class being placed itself
+                    if (peer.getUniqueId().equals(clazz.getUniqueId()))
+                        continue;
+                    // Skip if already flagged as a conflict or already in current change set
+                    if (iChange.getCurrent(peer.getUniqueId()) != null)
+                        continue;
+                    if (iChange.getConflict(peer.getUniqueId()) != null)
+                        continue;
+
+                    Assignment peerCommitted = peer.getCommittedAssignment();
+                    if (peerCommitted == null || peer.isCancelled())
+                        continue;
+
+                    ClassTimeInfo peerTime = new ClassTimeInfo(peerCommitted);
+
+                    if (evaluateDistributionViolation(
+                            constraintType, isRequired,
+                            proposedTime, proposedRooms,
+                            peerTime, peerCommitted)) {
+                        iChange.getConflicts().add(new ClassAssignment(peerCommitted));
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Returns {@code true} when placing the current class at
+     * {@code myTime}/{@code myRooms}
+     * together with a peer already committed to
+     * {@code peerTime}/{@code peerAssignment}
+     * constitutes a violation of the hard distribution constraint identified by
+     * {@code constraintType} and {@code isRequired}.
+     *
+     * <p>
+     * Semantics:
+     * <ul>
+     * <li><b>Required</b> – violated when the two placements do <em>not</em>
+     * satisfy
+     * the constraint (i.e. the required pattern is missing).</li>
+     * <li><b>Prohibited</b> – violated when the two placements <em>do</em> satisfy
+     * the
+     * constraint (i.e. the prohibited pattern is present).</li>
+     * </ul>
+     * </p>
+     *
+     * <p>
+     * Only the most semantically self-contained constraint types are evaluated
+     * here.
+     * Unknown types return {@code false} (no conflict assumed) to avoid false
+     * positives.
+     * </p>
+     *
+     * @param constraintType canonical reference string from
+     *                       {@code DistributionType.getReference()}
+     * @param isRequired     {@code true} for REQUIRED, {@code false} for PROHIBITED
+     * @param myTime         proposed time for the class being placed
+     * @param myRooms        proposed rooms for the class being placed (may be
+     *                       {@code null})
+     * @param peerTime       committed time of the peer class
+     * @param peerAssignment committed {@link Assignment} of the peer class
+     * @return {@code true} if a hard constraint violation is detected
+     */
+    private boolean evaluateDistributionViolation(
+            String constraintType, boolean isRequired,
+            ClassTimeInfo myTime, Collection<ClassRoomInfo> myRooms,
+            ClassTimeInfo peerTime, Assignment peerAssignment) {
+
+        if (constraintType == null)
+            return false;
+
+        // Derived time properties (computed once for reuse)
+        boolean sameStartSlot = (myTime.getStartSlot() == peerTime.getStartSlot());
+        boolean sameDays = (myTime.getDayCode() == peerTime.getDayCode());
+        boolean sameLength = (myTime.getLength() == peerTime.getLength());
+        boolean timesOverlap = myTime.overlaps(peerTime);
+        boolean exactSameTime = sameStartSlot && sameDays && sameLength
+                && myTime.shareWeeks(peerTime);
+
+        switch (constraintType) {
+
+            // ── Time-based constraints ──────────────────────────────────────────────
+            case "SAME_TIME":
+                // Required: both classes must meet at exactly the same time.
+                // Prohibited: both classes must NOT meet at the same time.
+                return isRequired ? !exactSameTime : exactSameTime;
+
+            case "DIFF_TIME":
+                // Required: the two classes must not overlap in time.
+                // Prohibited: the two classes must overlap (i.e. must NOT be at different
+                // times).
+                return isRequired ? timesOverlap : !timesOverlap;
+
+            case "SAME_DAYS":
+                // Required: identical day-of-week pattern.
+                // Prohibited: day-of-week patterns must differ.
+                return isRequired ? !sameDays : sameDays;
+
+            case "SAME_START":
+                // Required: both classes start in the same 5-minute slot.
+                // Prohibited: they must NOT start at the same slot.
+                return isRequired ? !sameStartSlot : sameStartSlot;
+
+            case "SAME_WEEKS":
+                // Required: the date-pattern weeks must overlap/be equal.
+                // Prohibited: they must not share any weeks.
+                boolean shareWeeks = myTime.shareWeeks(peerTime);
+                return isRequired ? !shareWeeks : shareWeeks;
+
+            // ── Room-based constraints ──────────────────────────────────────────────
+            case "SAME_ROOM": {
+                // Required: at least one room must be shared.
+                // Prohibited: no room may be shared.
+                if (myRooms == null || myRooms.isEmpty())
+                    return false;
+                Set<Long> peerRoomIds = new HashSet<>();
+                if (peerAssignment.getRooms() != null)
+                    for (Object r : peerAssignment.getRooms())
+                        peerRoomIds.add(((Location) r).getUniqueId());
+                boolean sharesRoom = false;
+                for (ClassRoomInfo rm : myRooms)
+                    if (peerRoomIds.contains(rm.getLocationId())) {
+                        sharesRoom = true;
+                        break;
+                    }
+                return isRequired ? !sharesRoom : sharesRoom;
+            }
+
+            // ── Combined time-and-room constraint ───────────────────────────────────
+            case "MEET_WITH": {
+                // Required: classes must meet at the same time AND in the same room.
+                if (myRooms == null || myRooms.isEmpty())
+                    return false;
+                Set<Long> peerRoomIds = new HashSet<>();
+                if (peerAssignment.getRooms() != null)
+                    for (Object r : peerAssignment.getRooms())
+                        peerRoomIds.add(((Location) r).getUniqueId());
+                boolean sharesRoom = false;
+                for (ClassRoomInfo rm : myRooms)
+                    if (peerRoomIds.contains(rm.getLocationId())) {
+                        sharesRoom = true;
+                        break;
+                    }
+                boolean meetTogether = exactSameTime && sharesRoom;
+                return isRequired ? !meetTogether : meetTogether;
+            }
+
+            // ── Back-to-back constraints ────────────────────────────────────────────
+            case "BTB":
+            case "BACK_TO_BACK": {
+                // Required: one class ends exactly where the other begins (same days, adjacent
+                // slots).
+                // Prohibited: classes must NOT be back-to-back.
+                boolean btb = sameDays && myTime.shareWeeks(peerTime)
+                        && (myTime.getStartSlot() + myTime.getLength() == peerTime.getStartSlot() ||
+                                peerTime.getStartSlot() + peerTime.getLength() == myTime.getStartSlot());
+                return isRequired ? !btb : btb;
+            }
+
+            case "BTB_TIME": {
+                // Same as BTB but additionally the day must be shared.
+                boolean btbTime = myTime.shareDays(peerTime) && myTime.shareWeeks(peerTime)
+                        && (myTime.getStartSlot() + myTime.getLength() == peerTime.getStartSlot() ||
+                                peerTime.getStartSlot() + peerTime.getLength() == myTime.getStartSlot());
+                return isRequired ? !btbTime : btbTime;
+            }
+
+            // ── Precedence constraint ───────────────────────────────────────────────
+            case "PRECEDENCE": {
+                // Required: myTime (class A) must end no later than peerTime (class B) starts,
+                // on days where both meet. Violation: A overlaps or starts after B.
+                // Prohibited: A must NOT precede B (order must be reversed or concurrent).
+                boolean aBeforeB = myTime.getStartSlot() + myTime.getLength() <= peerTime.getStartSlot();
+                return isRequired ? !aBeforeB : aBeforeB;
+            }
+
+            // ── Fallback: unknown / un-modelled constraint type ─────────────────────
+            default:
+                // Do not flag a conflict for constraint types we cannot evaluate from
+                // time/room data alone (e.g. flexible, min-gap, or custom constraints).
+                // The solver will catch these during full optimisation.
+                return false;
+        }
+    }
+
     public boolean isKeepConflictingAssignments() {
-    	return !iUnassignConflictingAssignments;
+        return !iUnassignConflictingAssignments;
     }
-    
-    public void setSessionContext(SessionContext context) { iContext = context; }
-    public SessionContext getSessionContext() { return iContext; }
-    
-    public boolean isUseRealStudents() { return iUseRealStudents; }
-    public void setUseRealStudents(boolean userReal) { iUseRealStudents = userReal; }
-    
-    public boolean isShowStudentConflicts() { return iShowStudentConflicts; }
-    public void setShowStudentConflicts(boolean showConflicts) { iShowStudentConflicts = showConflicts; }
+
+    public void setSessionContext(SessionContext context) {
+        iContext = context;
+    }
+
+    public SessionContext getSessionContext() {
+        return iContext;
+    }
+
+    public boolean isUseRealStudents() {
+        return iUseRealStudents;
+    }
+
+    public void setUseRealStudents(boolean userReal) {
+        iUseRealStudents = userReal;
+    }
+
+    public boolean isShowStudentConflicts() {
+        return iShowStudentConflicts;
+    }
+
+    public void setShowStudentConflicts(boolean showConflicts) {
+        iShowStudentConflicts = showConflicts;
+    }
 }
