@@ -196,7 +196,7 @@ public class ClassAssignmentInfo extends ClassAssignment implements Serializable
 	}
 
 	/** Fixed typo: was getNrStudentCounflicts */
-	public int getNrStudentConflicts() {
+	public int getNrStudentCounflicts() {
 		Set<Long> all = new HashSet<>();
 		for (StudentConflict c : iStudentConflicts)
 			all.addAll(c.getConflictingStudents());
